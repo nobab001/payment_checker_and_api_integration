@@ -1,0 +1,28 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // config/* — read by Flutter app (RemoteConfigService) and Cloud Functions
+    match /config/{doc} {
+      allow read:  if true;
+      allow write: if false;
+    }
+
+    // users — each user reads/writes only their own doc
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // otps, pending_registrations, sms_gateways — Cloud Functions only
+    // (admin SDK bypasses security rules entirely)
+    match /otps/{doc} {
+      allow read, write: if false;
+    }
+    match /pending_registrations/{doc} {
+      allow read, write: if false;
+    }
+    match /sms_gateways/{doc} {
+      allow read, write: if false;
+    }
+  }
+}

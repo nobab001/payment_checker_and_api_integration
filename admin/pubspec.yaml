@@ -1,0 +1,29 @@
+name: payment_checker_admin
+description: Admin panel for Payment Checker — manages config, API keys, and users via Firestore.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.10.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  firebase_core: ^3.3.0
+  firebase_auth: ^5.2.0
+  cloud_firestore: ^5.4.0
+
+  provider: ^6.1.2
+  intl: ^0.19.0
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  # Direct dev dependency: widget_test imports test.dart (setupFirebaseCoreMocks).
+  firebase_core_platform_interface: ^6.0.3
+
+flutter:
+  uses-material-design: true

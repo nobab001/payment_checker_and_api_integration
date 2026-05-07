@@ -1,0 +1,98 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "User → phone (Android, flavor user)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "${workspaceFolder}",
+      "program": "lib/main.dart",
+      "toolArgs": ["-d", "android", "--flavor", "user"]
+    },
+    {
+      "name": "Debug User App",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "${workspaceFolder}",
+      "program": "lib/main.dart",
+      "toolArgs": ["-d", "android", "--flavor", "user"]
+    },
+    {
+      "name": "Debug Admin App",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "${workspaceFolder}",
+      "program": "lib/main_admin.dart",
+      "toolArgs": ["-d", "android", "--flavor", "admin"]
+    },
+    {
+      "name": "User App — Android (pick device)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "${workspaceFolder}",
+      "program": "lib/main.dart",
+      "toolArgs": ["--flavor", "user"]
+    },
+    {
+      "name": "User App — Chrome",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "${workspaceFolder}",
+      "program": "lib/main.dart",
+      "toolArgs": ["-d", "chrome"]
+    },
+    {
+      "name": "Admin → Chrome",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "${workspaceFolder}/admin",
+      "program": "lib/main.dart",
+      "toolArgs": ["-d", "chrome"]
+    },
+    {
+      "name": "Admin App — Chrome (ব্রাউজার)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "${workspaceFolder}/admin",
+      "program": "lib/main.dart",
+      "toolArgs": ["-d", "chrome"]
+    },
+    {
+      "name": "Admin App — Edge",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "${workspaceFolder}/admin",
+      "program": "lib/main.dart",
+      "toolArgs": ["-d", "edge"]
+    }
+  ],
+  "compounds": [
+    {
+      "name": "User phone + Admin Chrome (একসাথে)",
+      "configurations": ["User → phone (Android, flavor user)", "Admin → Chrome"],
+      "stopAll": true,
+      "presentation": {
+        "group": "payment_checker",
+        "order": 1
+      }
+    },
+    {
+      "name": "একসাথে: User (Android) + Admin (Chrome)",
+      "configurations": ["User → phone (Android, flavor user)", "Admin App — Chrome (ব্রাউজার)"],
+      "stopAll": true,
+      "presentation": {
+        "group": "payment_checker",
+        "order": 2
+      }
+    },
+    {
+      "name": "একসাথে: User + Admin (দুইটি Android অ্যাপ)",
+      "configurations": ["Debug User App", "Debug Admin App"],
+      "stopAll": true,
+      "presentation": {
+        "group": "payment_checker",
+        "order": 3
+      }
+    }
+  ]
+}

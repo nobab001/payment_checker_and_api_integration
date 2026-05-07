@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "65010316831",
+    "project_id": "payment-checker-4049e",
+    "storage_bucket": "payment-checker-4049e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:65010316831:android:57752e87923a411bd6c72a",
+        "android_client_info": {
+          "package_name": "com.yourdomain.userapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDx9KrEf16ys9nzFlHvOCwAPA19XqhVK7Y"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:65010316831:android:2e7592098d1393fbd6c72a",
+        "android_client_info": {
+          "package_name": "com.yourdomain.adminapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDx9KrEf16ys9nzFlHvOCwAPA19XqhVK7Y"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
