@@ -41,66 +41,77 @@ class OtpService {
   OtpService._();
   static final instance = OtpService._();
 
-  /// Sends OTP via `/api/send-otp` with body `{ "phone": contact }`.
-  /// [contact] is either a Bangladesh mobile number or a `@gmail.com` address (server picks SMS vs Gmail).
+  // ── Send OTP to an EXISTING user ──────────────────────────────────────────
+  // Calls POST /api/send-otp  with body  { "contact": "<phone or email>" }
   Future<OtpResult> sendOtp(String contact) async {
     try {
-      final data = await ApiService.instance.postJson('/api/send-otp', {
-        'phone': contact.trim(),
-      });
+      final c    = ApiService.normalizeContactForApi(contact);
+      final data = await ApiService.instance.postJson('/api/send-otp', {'contact': c});
       if (data['success'] == false) {
-        final msg = _messageFromBody(data);
-        return OtpResult.fail(OtpError.unknown, msg ?? 'OTP পাঠানো যায়নি');
+        return OtpResult.fail(OtpError.unknown, _messageFromBody(data) ?? 'OTP পাঠানো যায়নি');
       }
       return const OtpResult.ok();
     } on ApiException catch (e) {
-      debugPrint(
-        '[OtpService] sendOtp ApiException: status=${e.statusCode} msg=${e.message}',
-      );
-      return OtpResult.fail(
-        _mapHttp(e.statusCode),
-        _friendlyServerMessage(e.message, _bengaliForSend(e.statusCode)),
-      );
+      debugPrint('[OtpService] sendOtp ApiException: status=${e.statusCode} msg=${e.message}');
+      return OtpResult.fail(_mapHttp(e.statusCode), _friendlyFromException(e, _bengaliForSend(e.statusCode)));
     } catch (e) {
       debugPrint('[OtpService] sendOtp unknown error: $e');
       return const OtpResult.fail(OtpError.unknown, 'কিছু একটা সমস্যা হয়েছে');
     }
   }
 
-  /// Verifies with `{ "phone": contact, "code": code }` (same [contact] as send).
+  // ── Send OTP to a NEW user (creates account first) ────────────────────────
+  // Calls POST /api/send-otp-new  with body  { "contact": "<phone or email>" }
+  Future<OtpResult> sendOtpNew(String contact) async {
+    try {
+      final c    = ApiService.normalizeContactForApi(contact);
+      final data = await ApiService.instance.postJson('/api/send-otp-new', {'contact': c});
+      if (data['success'] == false) {
+        final errCode = data['error'] as String?;
+        if (errCode == 'ALREADY_EXISTS') {
+          // Account was created between the check and now → treat as existing user
+          return OtpResult.fail(OtpError.alreadyUsed, 'এই নম্বর/ইমেইলে ইতিমধ্যে একটি অ্যাকাউন্ট আছে');
+        }
+        return OtpResult.fail(OtpError.unknown, _messageFromBody(data) ?? 'OTP পাঠানো যায়নি');
+      }
+      return const OtpResult.ok(isNewUser: true);
+    } on ApiException catch (e) {
+      debugPrint('[OtpService] sendOtpNew ApiException: status=${e.statusCode} msg=${e.message}');
+      return OtpResult.fail(_mapHttp(e.statusCode), _friendlyFromException(e, _bengaliForSend(e.statusCode)));
+    } catch (e) {
+      debugPrint('[OtpService] sendOtpNew unknown error: $e');
+      return const OtpResult.fail(OtpError.unknown, 'কিছু একটা সমস্যা হয়েছে');
+    }
+  }
+
+  // ── Verify OTP code ───────────────────────────────────────────────────────
+  // Calls POST /api/verify-otp  with body  { "contact": "...", "code": "123456" }
   Future<OtpResult> verifyOtp(String contact, String code) async {
     try {
+      final c    = ApiService.normalizeContactForApi(contact);
       final data = await ApiService.instance.postJson('/api/verify-otp', {
-        'phone': contact.trim(),
+        'contact': c,
         'code': code.trim(),
       });
       final parsed = OtpVerifyResponse.fromJson(data);
       if (!parsed.success) {
-        final msg = parsed.message ?? 'যাচাই ব্যর্থ হয়েছে';
-        return OtpResult.fail(OtpError.invalid, msg);
+        return OtpResult.fail(OtpError.invalid, parsed.message ?? 'যাচাই ব্যর্থ হয়েছে');
       }
       final token = parsed.token;
       if (token == null || token.isEmpty) {
         return const OtpResult.fail(OtpError.unknown, 'সার্ভার টোকেন পাঠায়নি');
       }
-      return OtpResult.ok(
-        token: token,
-        isNewUser: parsed.isNewUser,
-        user: parsed.user,
-      );
+      return OtpResult.ok(token: token, isNewUser: parsed.isNewUser, user: parsed.user);
     } on ApiException catch (e) {
-      debugPrint(
-        '[OtpService] verifyOtp ApiException: status=${e.statusCode} msg=${e.message}',
-      );
-      return OtpResult.fail(
-        _mapHttp(e.statusCode),
-        _friendlyServerMessage(e.message, _bengaliForOtp(e.statusCode)),
-      );
+      debugPrint('[OtpService] verifyOtp ApiException: status=${e.statusCode} msg=${e.message}');
+      return OtpResult.fail(_mapHttp(e.statusCode), _friendlyFromException(e, _bengaliForOtp(e.statusCode)));
     } catch (e) {
       debugPrint('[OtpService] verifyOtp unknown error: $e');
       return const OtpResult.fail(OtpError.unknown, 'কিছু একটা সমস্যা হয়েছে');
     }
   }
+
+  // ── Private helpers ───────────────────────────────────────────────────────
 
   OtpError _mapHttp(int? status) => switch (status) {
         400 => OtpError.invalid,
@@ -110,7 +121,7 @@ class OtpService {
         429 => OtpError.rateLimited,
         500 => OtpError.unknown,
         503 => OtpError.notConfigured,
-        _ => OtpError.unknown,
+        _   => OtpError.unknown,
       };
 
   String? _messageFromBody(Map<String, dynamic> data) {
@@ -121,7 +132,6 @@ class OtpService {
     return null;
   }
 
-  /// Prefer a short server [apiMessage] when it looks user-facing; else [fallback].
   String _friendlyServerMessage(String apiMessage, String fallback) {
     final t = apiMessage.trim();
     if (t.isEmpty || t == 'Request failed') return fallback;
@@ -129,12 +139,27 @@ class OtpService {
     return t;
   }
 
+  String _friendlyFromException(ApiException e, String fallback) {
+    switch (e.code) {
+      case 'network':
+        return 'ইন্টারনেট বা সার্ভার কানেকশন সমস্যা — আবার চেষ্টা করুন';
+      case 'timeout':
+        return 'সার্ভার রেসপন্স দেরি করছে — কিছুক্ষণ পর আবার চেষ্টা করুন';
+      case 'bad_response':
+        return 'সার্ভার থেকে সঠিক ডেটা পাওয়া যায়নি';
+      default:
+        return _friendlyServerMessage(e.message, fallback);
+    }
+  }
+
   String _bengaliForSend(int? status) => switch (status) {
         400 => 'অনুরোধ গ্রহণযোগ্য নয় — নম্বর বা তথ্য পরীক্ষা করুন',
+        404 => 'এই নামে কোনো অ্যাকাউন্ট খুঁজে পাওয়া যায়নি!',
+        409 => 'এই নম্বর/ইমেইলে ইতিমধ্যে একটি অ্যাকাউন্ট আছে',
         429 => '৬০ সেকেন্ড পরে আবার চেষ্টা করুন',
         500 => 'সার্ভারে সমস্যা হয়েছে। কিছুক্ষণ পর আবার চেষ্টা করুন',
         503 => 'SMS বা ইমেইল OTP সার্ভারে চালু নেই',
-        _ => 'কিছু একটা সমস্যা হয়েছে',
+        _   => 'কিছু একটা সমস্যা হয়েছে',
       };
 
   String _bengaliForOtp(int? status) => switch (status) {
@@ -145,6 +170,6 @@ class OtpService {
         429 => '৬০ সেকেন্ড পরে আবার চেষ্টা করুন',
         500 => 'সার্ভারে সমস্যা হয়েছে। কিছুক্ষণ পর আবার চেষ্টা করুন',
         503 => 'SMS বা ইমেইল OTP সার্ভারে চালু নেই',
-        _ => 'কিছু একটা সমস্যা হয়েছে',
+        _   => 'কিছু একটা সমস্যা হয়েছে',
       };
 }

@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 
-/// Flutter ↔ VPS Node API (`server/app.js`, port 3000).
-const String kVpsApiBaseUrl = 'http://paychek.online:3000';
+/// Flutter ↔ Node API (`server/app.js`, port 3000).
+///
+/// Android Emulator  → 10.0.2.2  (emulator's alias for PC localhost)
+/// Windows/Chrome    → localhost
+/// Physical Android  → তোমার PC-র local IP (যেমন 192.168.1.x)
+const String kVpsApiBaseUrl = 'http://192.168.0.116:3000';
 
 class AppColors {
   static const Color primary = Color(0xFF1A237E);
