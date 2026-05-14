@@ -7,6 +7,7 @@ import '../providers/sync_provider.dart';
 import '../services/payment_service.dart';
 import '../sync/sync_config.dart';
 import '../utils/constants.dart';
+import 'sms_filter_forward_settings_page.dart';
 import 'sync_settings_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
@@ -171,6 +172,22 @@ class ProfileScreen extends StatelessWidget {
           ),
           const SizedBox(height: 20),
           _syncTileWidget(context),
+          const SizedBox(height: 12),
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: ListTile(
+              leading: Icon(Icons.filter_alt_outlined, color: AppColors.primary, size: 26),
+              title: const Text('SMS filter & forward', style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: const Text('Allowed senders, local server URL'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const SmsFilterForwardSettingsPage()),
+                );
+              },
+            ),
+          ),
           const SizedBox(height: 32),
           SizedBox(
             width: double.infinity,

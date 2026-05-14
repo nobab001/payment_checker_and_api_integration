@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/user_model.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../services/device_session_bridge.dart';
 
 class AuthProvider extends ChangeNotifier {
   UserModel? _user;
@@ -48,6 +49,14 @@ class AuthProvider extends ChangeNotifier {
           await AuthService.instance.clearSession();
         }
       }
+
+      if (_user != null) {
+        try {
+          await ApiService.instance.syncDeviceSettingsToCache();
+        } catch (_) {
+          // Non-critical
+        }
+      }
     } finally {
       _restoring = false;
       notifyListeners();
@@ -88,6 +97,7 @@ class AuthProvider extends ChangeNotifier {
       }
       await AuthService.instance.persistSession(token, resolved);
       _user = resolved;
+      await ApiService.instance.syncBaseUrlFromPrefs();
     } catch (e) {
       await AuthService.instance.clearSession();
       _user = null;
@@ -119,6 +129,7 @@ class AuthProvider extends ChangeNotifier {
     await AuthService.instance.clearSession();
     _user = null;
     clearPendingContact();
+    DeviceSessionBridge.notifySignedOut();
     notifyListeners();
   }
 }

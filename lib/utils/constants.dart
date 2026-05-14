@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
 
-/// Flutter ↔ Node API (`server/app.js`, port 3000).
-///
-/// Android Emulator  → 10.0.2.2  (emulator's alias for PC localhost)
-/// Windows/Chrome    → localhost
-/// Physical Android  → তোমার PC-র local IP (যেমন 192.168.1.x)
-const String kVpsApiBaseUrl = 'http://192.168.0.116:3000';
+import '../config/api_config.dart';
+
+/// @deprecated Prefer [kDefaultApiBaseUrl] from [api_config.dart].
+const String kVpsApiBaseUrl = kDefaultApiBaseUrl;
 
 class AppColors {
   static const Color primary = Color(0xFF1A237E);
@@ -22,8 +20,8 @@ class AppStrings {
 }
 
 class AppConfig {
-  /// Same host as [kVpsApiBaseUrl] — keep one value for app + backend sync.
-  static const String apiBaseUrl = kVpsApiBaseUrl;
+  /// Same default as [kDefaultApiBaseUrl] in `lib/config/api_config.dart`.
+  static const String apiBaseUrl = kDefaultApiBaseUrl;
 }
 
 class OperatorConfig {

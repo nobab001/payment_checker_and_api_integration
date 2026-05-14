@@ -42,11 +42,11 @@ class OtpService {
   static final instance = OtpService._();
 
   // ── Send OTP to an EXISTING user ──────────────────────────────────────────
-  // Calls POST /api/send-otp  with body  { "contact": "<phone or email>" }
+  // Calls POST /api/send-otp  with body  { "phone": "<phone or email>" }
   Future<OtpResult> sendOtp(String contact) async {
     try {
       final c    = ApiService.normalizeContactForApi(contact);
-      final data = await ApiService.instance.postJson('/api/send-otp', {'contact': c});
+      final data = await ApiService.instance.postJson('/api/send-otp', {'phone': c});
       if (data['success'] == false) {
         return OtpResult.fail(OtpError.unknown, _messageFromBody(data) ?? 'OTP পাঠানো যায়নি');
       }
@@ -61,11 +61,11 @@ class OtpService {
   }
 
   // ── Send OTP to a NEW user (creates account first) ────────────────────────
-  // Calls POST /api/send-otp-new  with body  { "contact": "<phone or email>" }
+  // Calls POST /api/send-otp-new  with body  { "phone": "<phone or email>" }
   Future<OtpResult> sendOtpNew(String contact) async {
     try {
       final c    = ApiService.normalizeContactForApi(contact);
-      final data = await ApiService.instance.postJson('/api/send-otp-new', {'contact': c});
+      final data = await ApiService.instance.postJson('/api/send-otp-new', {'phone': c});
       if (data['success'] == false) {
         final errCode = data['error'] as String?;
         if (errCode == 'ALREADY_EXISTS') {
@@ -85,12 +85,12 @@ class OtpService {
   }
 
   // ── Verify OTP code ───────────────────────────────────────────────────────
-  // Calls POST /api/verify-otp  with body  { "contact": "...", "code": "123456" }
+  // Calls POST /api/verify-otp  with body  { "phone": "...", "code": "123456" }
   Future<OtpResult> verifyOtp(String contact, String code) async {
     try {
       final c    = ApiService.normalizeContactForApi(contact);
       final data = await ApiService.instance.postJson('/api/verify-otp', {
-        'contact': c,
+        'phone': c,
         'code': code.trim(),
       });
       final parsed = OtpVerifyResponse.fromJson(data);
@@ -140,9 +140,18 @@ class OtpService {
   }
 
   String _friendlyFromException(ApiException e, String fallback) {
+    const tip = ' API ঠিকানা: Profile → SMS filter & forward।';
     switch (e.code) {
+      case 'connection_failed':
+        return e.message;
+      case 'network_refused':
+        return 'সার্ভার চালু নেই বা পোর্ট বন্ধ — Node চালু আছে কিনা দেখুন।$tip';
+      case 'network_dns':
+        return 'সার্ভার ঠিকানা খুঁজে পাওয়া যায়নি।$tip';
+      case 'network_routing':
+        return 'নেটওয়ার্ক রুট নেই — কানেকশন পরীক্ষা করুন।$tip';
       case 'network':
-        return 'ইন্টারনেট বা সার্ভার কানেকশন সমস্যা — আবার চেষ্টা করুন';
+        return 'ইন্টারনেট বা সার্ভার কানেকশন সমস্যা — আবার চেষ্টা করুন।$tip';
       case 'timeout':
         return 'সার্ভার রেসপন্স দেরি করছে — কিছুক্ষণ পর আবার চেষ্টা করুন';
       case 'bad_response':

@@ -55,6 +55,12 @@ dependencies:
   # SMS Sync: HTTP client (sub-device pushes to main)
   http: ^1.4.0
 
+  # Android device ID (for device registration)
+  android_id: ^0.5.1
+
+  # Real-time parent ↔ child device approval (Socket.io)
+  socket_io_client: ^3.0.2
+
   # SMS Sync: HTTP server (main device receives from subs)
   shelf: ^1.4.2
 

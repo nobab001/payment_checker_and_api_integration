@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -22,19 +24,20 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _formKey   = GlobalKey<FormState>();
+  final _formKey = GlobalKey<FormState>();
   final _emailCtrl = TextEditingController();
 
-  final List<TextEditingController> _otpCtrl =
-      List.generate(6, (_) => TextEditingController());
-  final List<FocusNode> _otpFocus =
-      List.generate(6, (_) => FocusNode());
+  final List<TextEditingController> _otpCtrl = List.generate(
+    6,
+    (_) => TextEditingController(),
+  );
+  final List<FocusNode> _otpFocus = List.generate(6, (_) => FocusNode());
 
-  bool _showOtp     = false;
-  bool _isNewUser   = false;  // true when coming from "Create Account" flow
-  bool _sendingOtp  = false;
-  bool _verifying   = false;
-  int  _cooldown    = 0;
+  bool _showOtp = false;
+  bool _isNewUser = false; // true when coming from "Create Account" flow
+  bool _sendingOtp = false;
+  bool _verifying = false;
+  int _cooldown = 0;
   Timer? _timer;
 
   // Server-rate-limit cooldown: shown when backend returns 429 (Too Many Requests).
@@ -45,8 +48,12 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void dispose() {
     _emailCtrl.dispose();
-    for (final c in _otpCtrl) { c.dispose(); }
-    for (final f in _otpFocus) { f.dispose(); }
+    for (final c in _otpCtrl) {
+      c.dispose();
+    }
+    for (final f in _otpFocus) {
+      f.dispose();
+    }
     _timer?.cancel();
     _serverCooldownTimer?.cancel();
     super.dispose();
@@ -58,7 +65,10 @@ class _LoginScreenState extends State<LoginScreen> {
     _serverCooldownTimer?.cancel();
     setState(() => _serverCooldown = seconds);
     _serverCooldownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) { t.cancel(); return; }
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
       setState(() {
         _serverCooldown--;
         if (_serverCooldown <= 0) t.cancel();
@@ -89,16 +99,31 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _isPhone(String s) => RegExp(r'^\d+$').hasMatch(s);
 
-  String get _contactForApi => ApiService.normalizeContactForApi(_emailCtrl.text);
+  String get _contactForApi =>
+      ApiService.normalizeContactForApi(_emailCtrl.text);
 
   String _connectivityMessage(ApiException e) {
+    const tip = '\n\nটিপ: API ঠিকানা বদলাতে Profile → SMS filter & forward। USB তে adb reverse tcp:3000 tcp:3000';
     switch (e.code) {
-      case 'network':  return 'ইন্টারনেট বা সার্ভার কানেকশন নেই — পরে আবার চেষ্টা করুন';
-      case 'timeout':  return 'সার্ভার রেসপন্স দেরি করছে — কিছুক্ষণ পর আবার চেষ্টা করুন';
-      case 'bad_response': return 'সার্ভার থেকে সঠিক ডেটা পাওয়া যায়নি';
+      case 'connection_failed':
+        return e.message;
+      case 'network_refused':
+        return 'সার্ভার চালু নেই বা পোর্ট বন্ধ — Node API চালু আছে কিনা দেখুন$tip';
+      case 'network_dns':
+        return 'সার্ভার ঠিকানা খুঁজে পাওয়া যায়নি — URL বা DNS পরীক্ষা করুন$tip';
+      case 'network_routing':
+        return 'নেটওয়ার্ক রুট নেই — কানেকশন বা VPN পরীক্ষা করুন$tip';
+      case 'network':
+        return 'ইন্টারনেট বা সার্ভার কানেকশন নেই — পরে আবার চেষ্টা করুন$tip';
+      case 'timeout':
+        return 'সার্ভার রেসপন্স দেরি করছে — কিছুক্ষণ পর আবার চেষ্টা করুন$tip';
+      case 'bad_response':
+        return 'সার্ভার থেকে সঠিক ডেটা পাওয়া যায়নি';
       default:
         final t = e.message.trim();
-        if (t.isEmpty || t == 'Request failed' || t.length > 120) return 'সার্ভারে সমস্যা — আবার চেষ্টা করুন';
+        if (t.isEmpty || t == 'Request failed' || t.length > 120) {
+          return 'সার্ভারে সমস্যা — আবার চেষ্টা করুন';
+        }
         return t;
     }
   }
@@ -111,6 +136,24 @@ class _LoginScreenState extends State<LoginScreen> {
     final input = _contactForApi;
 
     setState(() => _sendingOtp = true);
+
+    if (!kIsWeb) {
+      try {
+        final results = await Connectivity().checkConnectivity();
+        final online = results.any((r) => r != ConnectivityResult.none);
+        if (!online) {
+          if (!mounted) return;
+          setState(() => _sendingOtp = false);
+          _showSnackbar(
+            'কোনো ইন্টারনেট কানেকশন নেই — Wi‑Fi বা মোবাইল ডেটা চালু করুন',
+            Colors.red[700]!,
+          );
+          return;
+        }
+      } catch (_) {
+        // If connectivity check fails, continue to HTTP health check.
+      }
+    }
 
     // 1. Check server reachability
     try {
@@ -143,13 +186,18 @@ class _LoginScreenState extends State<LoginScreen> {
       } else {
         _showSnackbar(_connectivityMessage(e), Colors.red[700]!);
       }
+    } on Exception catch (_) {
+      // Connection errors (SocketException, timeout, etc.) → show error message
+      if (!mounted) return;
+      setState(() => _sendingOtp = false);
+      _showSnackbar('সংযোগ ব্যর্থ হয়েছে — আবার চেষ্টা করুন', Colors.red[700]!);
     }
   }
 
   /// Show popup: "Account not found" with Create / Cancel buttons.
   void _showAccountNotFoundDialog(String contact) {
     final isPhone = _isPhone(contact);
-    final label   = isPhone ? 'মোবাইল নম্বর' : 'জিমেইল';
+    final label = isPhone ? 'মোবাইল নম্বর' : 'জিমেইল';
 
     showDialog<void>(
       context: context,
@@ -158,7 +206,11 @@ class _LoginScreenState extends State<LoginScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
-            Icon(Icons.person_search_outlined, color: Colors.orange.shade700, size: 26),
+            Icon(
+              Icons.person_search_outlined,
+              color: Colors.orange.shade700,
+              size: 26,
+            ),
             const SizedBox(width: 8),
             const Expanded(
               child: Text(
@@ -174,12 +226,19 @@ class _LoginScreenState extends State<LoginScreen> {
           children: [
             RichText(
               text: TextSpan(
-                style: TextStyle(fontSize: 14, color: Colors.grey.shade700, height: 1.5),
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey.shade700,
+                  height: 1.5,
+                ),
                 children: [
                   TextSpan(text: '$label '),
                   TextSpan(
                     text: contact,
-                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black87),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                    ),
                   ),
                   const TextSpan(text: ' দিয়ে কোনো অ্যাকাউন্ট নেই।'),
                 ],
@@ -200,7 +259,9 @@ class _LoginScreenState extends State<LoginScreen> {
             style: OutlinedButton.styleFrom(
               foregroundColor: Colors.grey.shade700,
               side: BorderSide(color: Colors.grey.shade300),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             ),
             child: const Text('বাতিল করুন'),
@@ -217,7 +278,9 @@ class _LoginScreenState extends State<LoginScreen> {
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primary,
               foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             ),
           ),
@@ -228,11 +291,17 @@ class _LoginScreenState extends State<LoginScreen> {
 
   /// Send OTP to EXISTING user via /api/send-otp
   Future<void> _sendOtp() async {
-    setState(() { _sendingOtp = true; _isNewUser = false; });
+    setState(() {
+      _sendingOtp = true;
+      _isNewUser = false;
+    });
     final result = await OtpService.instance.sendOtp(_contactForApi);
     if (!mounted) return;
     if (result.success) {
-      setState(() { _showOtp = true; _sendingOtp = false; });
+      setState(() {
+        _showOtp = true;
+        _sendingOtp = false;
+      });
       _startCooldown();
       Future.delayed(const Duration(milliseconds: 100), () {
         if (mounted) _otpFocus[0].requestFocus();
@@ -249,20 +318,32 @@ class _LoginScreenState extends State<LoginScreen> {
 
   /// Create new account + send OTP via /api/send-otp-new
   Future<void> _sendOtpNew() async {
-    setState(() { _sendingOtp = true; _isNewUser = true; });
+    setState(() {
+      _sendingOtp = true;
+      _isNewUser = true;
+    });
     final result = await OtpService.instance.sendOtpNew(_contactForApi);
     if (!mounted) return;
     if (result.success) {
-      setState(() { _showOtp = true; _sendingOtp = false; });
+      setState(() {
+        _showOtp = true;
+        _sendingOtp = false;
+      });
       _startCooldown();
       Future.delayed(const Duration(milliseconds: 100), () {
         if (mounted) _otpFocus[0].requestFocus();
       });
     } else {
-      setState(() { _sendingOtp = false; _isNewUser = false; });
+      setState(() {
+        _sendingOtp = false;
+        _isNewUser = false;
+      });
       // If the account already exists (race condition), switch to normal OTP flow
       if (result.error == OtpError.alreadyUsed) {
-        _showSnackbar('এই নম্বরে অ্যাকাউন্ট আছে — OTP পাঠানো হচ্ছে', Colors.blue.shade700);
+        _showSnackbar(
+          'এই নম্বরে অ্যাকাউন্ট আছে — OTP পাঠানো হচ্ছে',
+          Colors.blue.shade700,
+        );
         await _sendOtp();
       } else if (result.error == OtpError.rateLimited) {
         _startServerCooldown(10);
@@ -280,7 +361,7 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
     setState(() => _verifying = true);
-    final input  = _contactForApi;
+    final input = _contactForApi;
     final result = await OtpService.instance.verifyOtp(input, code);
     if (!mounted) return;
     if (result.success && result.token != null) {
@@ -298,14 +379,17 @@ class _LoginScreenState extends State<LoginScreen> {
     } else {
       setState(() => _verifying = false);
       _showSnackbar(result.message ?? 'যাচাই ব্যর্থ হয়েছে', Colors.red[700]!);
-      if (result.error == OtpError.expired || result.error == OtpError.alreadyUsed) {
+      if (result.error == OtpError.expired ||
+          result.error == OtpError.alreadyUsed) {
         _clearOtp();
       }
     }
   }
 
   void _clearOtp() {
-    for (final c in _otpCtrl) { c.clear(); }
+    for (final c in _otpCtrl) {
+      c.clear();
+    }
     _otpFocus[0].requestFocus();
   }
 
@@ -313,7 +397,10 @@ class _LoginScreenState extends State<LoginScreen> {
     _cooldown = 60;
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) { t.cancel(); return; }
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
       setState(() {
         _cooldown--;
         if (_cooldown <= 0) t.cancel();
@@ -324,13 +411,13 @@ class _LoginScreenState extends State<LoginScreen> {
   void _onOtpDigit(int i, String val) {
     // ── 1. Full 6-digit paste into any box → distribute and auto-verify ──
     if (val.length == 6 && RegExp(r'^\d{6}$').hasMatch(val)) {
-      for (int j = 0; j < 6; j++) { _otpCtrl[j].text = val[j]; }
-      _otpFocus[5].requestFocus();
+      for (int j = 0; j < 6; j++) {
+        _otpCtrl[j].value = TextEditingValue(text: val[j]);
+      }
       _onLoginWithOtp();
       return;
     }
 
-    // ── 2. User typed an extra char on an already-filled box ──
     // Keep only the LAST typed digit (overwrite behavior).
     if (val.length > 1) {
       final keep = val.substring(val.length - 1);
@@ -359,25 +446,33 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _showSnackbar(String msg, Color bg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg),
-      backgroundColor: bg,
-      duration: const Duration(milliseconds: 1500),
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-    ));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: bg,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+      ),
+    );
   }
 
   Future<void> _launch(String url) async {
     if (url.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: const Text('শীঘ্রই আসছে — আমাদের সাথেই থাকুন!'),
-          backgroundColor: const Color(0xFF37474F),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          duration: const Duration(milliseconds: 750),
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('শীঘ্রই আসছে — আমাদের সাথেই থাকুন!'),
+            backgroundColor: const Color(0xFF37474F),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            duration: const Duration(milliseconds: 750),
+          ),
+        );
       }
       return;
     }
@@ -385,12 +480,16 @@ class _LoginScreenState extends State<LoginScreen> {
       await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: const Text('লিংক খোলা যায়নি'),
-          backgroundColor: const Color(0xFF37474F),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('লিংক খোলা যায়নি'),
+            backgroundColor: const Color(0xFF37474F),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        );
       }
     }
   }
@@ -399,9 +498,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final auth        = context.watch<AuthProvider>();
-    final rc          = context.watch<RemoteConfigProvider>().config;
-    final busy        = _sendingOtp || _verifying || auth.loading;
+    final auth = context.watch<AuthProvider>();
+    final rc = context.watch<RemoteConfigProvider>().config;
+    final busy = _sendingOtp || _verifying || auth.loading;
     final appDisabled = !rc.appEnabled;
     final rateLimited = _serverCooldown > 0;
 
@@ -419,7 +518,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   // ── Maintenance banner ─────────────────────────────────
                   if (appDisabled) ...[
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.orange.shade50,
                         borderRadius: BorderRadius.circular(10),
@@ -427,12 +529,19 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       child: Row(
                         children: [
-                          Icon(Icons.construction, color: Colors.orange.shade700, size: 20),
+                          Icon(
+                            Icons.construction,
+                            color: Colors.orange.shade700,
+                            size: 20,
+                          ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
                               'অ্যাপটি সাময়িকভাবে রক্ষণাবেক্ষণের জন্য বন্ধ আছে',
-                              style: TextStyle(color: Colors.orange.shade800, fontSize: 13),
+                              style: TextStyle(
+                                color: Colors.orange.shade800,
+                                fontSize: 13,
+                              ),
                             ),
                           ),
                         ],
@@ -442,12 +551,20 @@ class _LoginScreenState extends State<LoginScreen> {
                   ],
 
                   // ── Logo / title ───────────────────────────────────────
-                  const Icon(Icons.account_balance_wallet, size: 64, color: AppColors.primary),
+                  const Icon(
+                    Icons.account_balance_wallet,
+                    size: 64,
+                    color: AppColors.primary,
+                  ),
                   const SizedBox(height: 12),
                   const Text(
                     AppStrings.appName,
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppColors.primary),
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.primary,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   const Text(
@@ -464,14 +581,20 @@ class _LoginScreenState extends State<LoginScreen> {
                     enabled: !_showOtp,
                     onChanged: (_) {
                       if (_showOtp) {
-                        setState(() { _showOtp = false; _isNewUser = false; _clearOtp(); });
+                        setState(() {
+                          _showOtp = false;
+                          _isNewUser = false;
+                          _clearOtp();
+                        });
                       }
                     },
                     decoration: InputDecoration(
                       labelText: 'মোবাইল নম্বর অথবা Gmail এড্রেস',
                       labelStyle: const TextStyle(fontSize: 13),
                       prefixIcon: const Icon(Icons.person_outline),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
                         borderSide: BorderSide(color: Colors.grey.shade300),
@@ -482,7 +605,10 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: AppColors.primary, width: 2),
+                        borderSide: const BorderSide(
+                          color: AppColors.primary,
+                          width: 2,
+                        ),
                       ),
                     ),
                     validator: _validateContact,
@@ -492,19 +618,30 @@ class _LoginScreenState extends State<LoginScreen> {
                   // ── OTP boxes (shown after OTP sent) ───────────────────
                   if (_showOtp) ...[
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
                       decoration: BoxDecoration(
-                        color: _isNewUser ? Colors.green.shade50 : Colors.blue.shade50,
+                        color: _isNewUser
+                            ? Colors.green.shade50
+                            : Colors.blue.shade50,
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
-                          color: _isNewUser ? Colors.green.shade200 : Colors.blue.shade200,
+                          color: _isNewUser
+                              ? Colors.green.shade200
+                              : Colors.blue.shade200,
                         ),
                       ),
                       child: Row(
                         children: [
                           Icon(
-                            _isNewUser ? Icons.person_add_outlined : Icons.sms_outlined,
-                            color: _isNewUser ? Colors.green.shade700 : Colors.blue.shade700,
+                            _isNewUser
+                                ? Icons.person_add_outlined
+                                : Icons.sms_outlined,
+                            color: _isNewUser
+                                ? Colors.green.shade700
+                                : Colors.blue.shade700,
                             size: 18,
                           ),
                           const SizedBox(width: 8),
@@ -514,7 +651,9 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ? '${_emailCtrl.text.trim()}-এ নিশ্চিতকরণ কোড পাঠানো হয়েছে'
                                   : '${_emailCtrl.text.trim()}-এ ৬ সংখ্যার কোড পাঠানো হয়েছে',
                               style: TextStyle(
-                                color: _isNewUser ? Colors.green.shade800 : Colors.blue.shade800,
+                                color: _isNewUser
+                                    ? Colors.green.shade800
+                                    : Colors.blue.shade800,
                                 fontSize: 12,
                               ),
                             ),
@@ -525,24 +664,34 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(height: 14),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: List.generate(6, (i) => _OtpBox(
-                        controller: _otpCtrl[i],
-                        focusNode: _otpFocus[i],
-                        onChanged: (v) => _onOtpDigit(i, v),
-                        onBackspaceOnEmpty: () => _onOtpBackspace(i),
-                      )),
+                      children: List.generate(
+                        6,
+                        (i) => _OtpBox(
+                          controller: _otpCtrl[i],
+                          focusNode: _otpFocus[i],
+                          onChanged: (v) => _onOtpDigit(i, v),
+                          onBackspaceOnEmpty: () => _onOtpBackspace(i),
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 10),
                     Center(
                       child: _cooldown > 0
                           ? Text(
                               '${_cooldown}s পরে আবার পাঠান',
-                              style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
+                              style: TextStyle(
+                                color: Colors.grey.shade500,
+                                fontSize: 12,
+                              ),
                             )
                           : TextButton(
-                              onPressed: busy ? null : (_isNewUser ? _sendOtpNew : _sendOtp),
-                              child: const Text('কোড আবার পাঠান',
-                                  style: TextStyle(color: AppColors.primary)),
+                              onPressed: busy
+                                  ? null
+                                  : (_isNewUser ? _sendOtpNew : _sendOtp),
+                              child: const Text(
+                                'কোড আবার পাঠান',
+                                style: TextStyle(color: AppColors.primary),
+                              ),
                             ),
                     ),
                     const SizedBox(height: 6),
@@ -551,7 +700,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   // ── Server rate-limit banner (Too Many Requests) ───────
                   if (rateLimited) ...[
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.amber.shade50,
                         borderRadius: BorderRadius.circular(10),
@@ -559,8 +711,11 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       child: Row(
                         children: [
-                          Icon(Icons.hourglass_top_rounded,
-                              color: Colors.amber.shade800, size: 22),
+                          Icon(
+                            Icons.hourglass_top_rounded,
+                            color: Colors.amber.shade800,
+                            size: 22,
+                          ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Column(
@@ -585,11 +740,15 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ),
                           Container(
-                            width: 40, height: 40,
+                            width: 40,
+                            height: 40,
                             decoration: BoxDecoration(
                               color: Colors.amber.shade100,
                               shape: BoxShape.circle,
-                              border: Border.all(color: Colors.amber.shade400, width: 2),
+                              border: Border.all(
+                                color: Colors.amber.shade400,
+                                width: 2,
+                              ),
                             ),
                             alignment: Alignment.center,
                             child: Text(
@@ -617,20 +776,32 @@ class _LoginScreenState extends State<LoginScreen> {
                       foregroundColor: Colors.white,
                       disabledBackgroundColor: Colors.grey.shade400,
                       padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                       elevation: 2,
                     ),
                     child: busy
                         ? const SizedBox(
-                            height: 20, width: 20,
-                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
                         : Text(
                             rateLimited
                                 ? '$_serverCooldown সেকেন্ড অপেক্ষা করুন'
                                 : (_showOtp
-                                    ? (_isNewUser ? 'নিশ্চিত করুন' : 'লগইন করুন')
-                                    : 'যাচাই করুন'),
-                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                      ? (_isNewUser
+                                            ? 'নিশ্চিত করুন'
+                                            : 'লগইন করুন')
+                                      : 'যাচাই করুন'),
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                   ),
                   const SizedBox(height: 44),
@@ -641,8 +812,13 @@ class _LoginScreenState extends State<LoginScreen> {
                       Expanded(child: Divider(color: Colors.grey.shade300)),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
-                        child: Text('আমাদের সাথে থাকুন',
-                            style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+                        child: Text(
+                          'আমাদের সাথে থাকুন',
+                          style: TextStyle(
+                            color: Colors.grey.shade500,
+                            fontSize: 12,
+                          ),
+                        ),
                       ),
                       Expanded(child: Divider(color: Colors.grey.shade300)),
                     ],
@@ -738,21 +914,27 @@ class _OtpBox extends StatelessWidget {
           maxLength: 6,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           style: const TextStyle(
-              fontSize: 22, fontWeight: FontWeight.bold, color: AppColors.primary),
+            fontSize: 22,
+            fontWeight: FontWeight.bold,
+            color: AppColors.primary,
+          ),
           decoration: InputDecoration(
             counterText: '',
             contentPadding: EdgeInsets.zero,
             filled: true,
             fillColor: Colors.grey.shade100,
             border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(color: Colors.grey.shade300)),
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(color: Colors.grey.shade300),
+            ),
             enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(color: Colors.grey.shade300)),
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(color: Colors.grey.shade300),
+            ),
             focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: AppColors.primary, width: 2)),
+              borderRadius: BorderRadius.circular(10),
+              borderSide: const BorderSide(color: AppColors.primary, width: 2),
+            ),
           ),
           onChanged: onChanged,
         ),
@@ -795,7 +977,10 @@ class _SocialBtn extends StatelessWidget {
             child: Center(child: FaIcon(icon, color: color, size: 24)),
           ),
           const SizedBox(height: 6),
-          Text(label, style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+          Text(
+            label,
+            style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+          ),
         ],
       ),
     );

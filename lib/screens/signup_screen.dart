@@ -58,7 +58,9 @@ class _SignupScreenState extends State<SignupScreen> {
   String? _validateEmail(String? v) {
     if (v == null || v.trim().isEmpty) return null; // optional
     final s = v.trim();
-    if (!s.contains('@gmail.com')) return 'শুধু @gmail.com ঠিকানা গ্রহণযোগ্য';
+    if (!RegExp(r'^[^\s@]+@gmail\.com$', caseSensitive: false).hasMatch(s)) {
+      return 'শুধু @gmail.com ঠিকানা গ্রহণযোগ্য';
+    }
     return null;
   }
 
@@ -70,8 +72,15 @@ class _SignupScreenState extends State<SignupScreen> {
     final pin  = _pinCtrl.text.trim();
     final opt  = _optionalCtrl.text.trim();
 
-    final phone = isPhone ? contact : opt;
-    final email = isPhone ? opt     : contact;
+    final String phone;
+    final String email;
+    if (isPhone) {
+      phone = ApiService.normalizeContactForApi(contact);
+      email = opt.isEmpty ? '' : ApiService.normalizeContactForApi(opt);
+    } else {
+      email = ApiService.normalizeContactForApi(contact);
+      phone = opt.isEmpty ? '' : ApiService.normalizeContactForApi(opt);
+    }
 
     try {
       final updated = await ApiService.instance.completeProfile(

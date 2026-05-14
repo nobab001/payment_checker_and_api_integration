@@ -1,12 +1,15 @@
-import 'package:flutter/foundation.dart';
+import 'package:android_id/android_id.dart';
 import 'package:flutter/widgets.dart';
+import 'package:flutter/foundation.dart';
 import 'package:telephony/telephony.dart';
 
+import 'device_settings_cache.dart';
+import 'local_sms_forward_service.dart';
+import 'storage_service.dart';
 import '../models/sms_record.dart';
 import '../sync/sync_service.dart';
 import '../utils/sms_parser.dart';
 import 'sms_monitoring_prefs.dart';
-import 'storage_service.dart';
 
 // Top-level function required by telephony for background isolate.
 // WidgetsFlutterBinding init is required so path_provider can use
@@ -14,12 +17,31 @@ import 'storage_service.dart';
 @pragma('vm:entry-point')
 Future<void> onBackgroundSms(SmsMessage message) async {
   WidgetsFlutterBinding.ensureInitialized();
+  await LocalSmsForwardService.instance.tryForwardIncomingSms(message);
   if (!await SmsMonitoringPrefs.isMonitoringEnabled()) return;
+
+  // Check device filter settings
+  final deviceId = await _getDeviceId();
+  final simSlot = message.subscriptionId ?? 0;
+  final body = message.body ?? '';
+
+  final shouldSync = await DeviceSettingsCache.shouldSyncSms(
+    deviceId: deviceId,
+    simSlot: simSlot,
+    smsBody: body,
+  );
+  if (!shouldSync) return;
+
   final address = message.address ?? '';
   if (!SmsParser.isValidSender(address)) return;
   final record = _buildRecord(message);
   await StorageService.instance.appendSms(record);
   await syncInBackground(record);
+}
+
+Future<String> _getDeviceId() async {
+  final androidId = AndroidId();
+  return await androidId.getId() ?? 'unknown';
 }
 
 SmsRecord _buildRecord(SmsMessage msg) {
@@ -55,16 +77,28 @@ class SmsService {
     if (kIsWeb || _listening) return;
     _listening = true;
     _telephony.listenIncomingSms(
-      onNewMessage: (SmsMessage message) {
-        SmsMonitoringPrefs.isMonitoringEnabled().then((enabled) {
+      onNewMessage: (SmsMessage message) async {
+        await LocalSmsForwardService.instance.tryForwardIncomingSms(message);
+        SmsMonitoringPrefs.isMonitoringEnabled().then((enabled) async {
           if (!enabled) return;
+
+          // Check device filter settings
+          final deviceId = await _getDeviceId();
+          final simSlot = message.subscriptionId ?? 0;
+          final body = message.body ?? '';
+          final shouldSync = await DeviceSettingsCache.shouldSyncSms(
+            deviceId: deviceId,
+            simSlot: simSlot,
+            smsBody: body,
+          );
+          if (!shouldSync) return;
+
           final address = message.address ?? '';
           if (!SmsParser.isValidSender(address)) return;
           final record = _buildRecord(message);
-          StorageService.instance.appendSms(record).then((_) async {
-            await SyncService.instance.onNewSms(record);
-            onNewSms?.call(record);
-          });
+          await StorageService.instance.appendSms(record);
+          await SyncService.instance.onNewSms(record);
+          onNewSms?.call(record);
         });
       },
       onBackgroundMessage: onBackgroundSms,

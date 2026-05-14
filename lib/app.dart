@@ -10,14 +10,15 @@ import 'package:provider/provider.dart';
 import 'package:workmanager/workmanager.dart';
 
 import 'providers/auth_provider.dart';
+import 'providers/device_approval_provider.dart';
 import 'providers/remote_config_provider.dart';
 import 'providers/sms_provider.dart';
 import 'providers/sync_provider.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
-import 'screens/otp_screen.dart';
 import 'screens/signup_screen.dart';
 import 'screens/splash_screen.dart';
+import 'services/api_service.dart';
 import 'sync/sync_worker.dart';
 import 'utils/constants.dart';
 import 'widgets/sms_permission_gate.dart';
@@ -28,6 +29,10 @@ Future<void> bootUserApp() async {
 
   final auth = AuthProvider();
   await auth.restoreSession();
+  await ApiService.instance.syncBaseUrlFromPrefs();
+
+  final deviceApproval = DeviceApprovalProvider();
+  DeviceApprovalProvider.wireSignOutBridge(deviceApproval);
 
   // Sync engine is Android-only (sqflite + workmanager have no web support).
   final syncProvider = SyncProvider();
@@ -42,6 +47,7 @@ Future<void> bootUserApp() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider<AuthProvider>.value(value: auth),
+        ChangeNotifierProvider<DeviceApprovalProvider>.value(value: deviceApproval),
         ChangeNotifierProvider(create: (_) => SmsProvider()),
         ChangeNotifierProvider(
             create: (_) => RemoteConfigProvider()..startListening()),
@@ -107,9 +113,7 @@ class _HomeLoader extends StatefulWidget {
 
 class _HomeLoaderState extends State<_HomeLoader> {
   bool _ready = false;
-  bool _needsOtp = false;
   bool _needsSetup = false;
-  String _otpContact = '';
 
   @override
   void initState() {
@@ -140,14 +144,7 @@ class _HomeLoaderState extends State<_HomeLoader> {
       return;
     }
 
-    if (userModel.email.isNotEmpty && !userModel.emailVerified) {
-      setState(() {
-        _otpContact = userModel.email;
-        _needsOtp = true;
-        _ready = true;
-      });
-      return;
-    }
+    // Email/phone OTP is already done on LoginScreen — do not send a second OTP here.
 
     if (userModel.needsProfileCompletion) {
       setState(() {
@@ -158,10 +155,6 @@ class _HomeLoaderState extends State<_HomeLoader> {
     }
 
     setState(() => _ready = true);
-  }
-
-  void _onOtpVerified() {
-    setState(() => _needsOtp = false);
   }
 
   @override
@@ -175,9 +168,6 @@ class _HomeLoaderState extends State<_HomeLoader> {
         });
         _init();
       });
-    }
-    if (_needsOtp) {
-      return OtpScreen(contact: _otpContact, onVerified: _onOtpVerified);
     }
     return const SmsPermissionGate(child: HomeScreen());
   }
