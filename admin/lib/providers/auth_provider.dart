@@ -1,15 +1,14 @@
 import 'package:flutter/foundation.dart';
-import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
 import '../services/auth_service.dart';
 
 class AdminAuthProvider extends ChangeNotifier {
   final _svc = AdminAuthService.instance;
 
-  User? _user;
+  AdminUser? _user;
   bool _loading = false;
   String? _error;
 
-  User? get user => _user;
+  AdminUser? get user => _user;
   bool get loading => _loading;
   String? get error => _error;
   bool get isAuthenticated => _user != null;
@@ -19,6 +18,7 @@ class AdminAuthProvider extends ChangeNotifier {
       _user = u;
       notifyListeners();
     });
+    _user = _svc.currentUser;
   }
 
   Future<bool> signIn(String email, String password) async {

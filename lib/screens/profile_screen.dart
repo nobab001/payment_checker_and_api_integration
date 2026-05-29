@@ -1,14 +1,17 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/auth_provider.dart';
-import '../providers/sync_provider.dart';
+import '../providers/device_approval_provider.dart';
 import '../services/payment_service.dart';
-import '../sync/sync_config.dart';
 import '../utils/constants.dart';
+import '../utils/parent_recovery.dart';
+import '../widgets/profile_credentials_card.dart';
+import 'api_integration/api_integration_hub_screen.dart';
 import 'sms_filter_forward_settings_page.dart';
-import 'sync_settings_screen.dart';
+import 'pin_settings_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -46,18 +49,36 @@ class ProfileScreen extends StatelessWidget {
             style: const TextStyle(color: Colors.grey, fontSize: 12),
           ),
           const SizedBox(height: 24),
+          const ProfileCredentialsCard(),
+          const SizedBox(height: 12),
           Card(
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: Column(
-              children: [
-                _infoTile(Icons.email_outlined, 'Email', user.email),
-                const Divider(height: 1),
-                _infoTile(Icons.phone_outlined, 'Phone', user.phone),
-                const Divider(height: 1),
-                _infoTile(Icons.badge_outlined, 'Role', user.role),
-              ],
+            child: ListTile(
+              leading: Icon(Icons.hub_outlined, color: AppColors.primary),
+              title: const Text(
+                'API Integration',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: const Text(
+                'Daraz, Alibaba — একই SIM দিয়ে মাল্টি-সাইট পেমেন্ট গেটওয়ে',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.push<void>(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => const ApiIntegrationHubScreen(),
+                  ),
+                );
+              },
             ),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: _infoTile(Icons.badge_outlined, 'Role', user.role),
           ),
           const SizedBox(height: 16),
           Card(
@@ -171,7 +192,33 @@ class ProfileScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
-          _syncTileWidget(context),
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: ListTile(
+              leading: Icon(Icons.lock_reset, color: AppColors.primary, size: 26),
+              title: const Text(
+                'নিরাপত্তা পিন',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(
+                user.pinConfigured
+                    ? 'পিন পরিবর্তন বা OTP দিয়ে রিসেট'
+                    : 'নতুন পিন সেট করুন',
+                style: const TextStyle(fontSize: 12),
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const PinSettingsScreen()),
+                );
+              },
+            ),
+          ),
+          if (!kIsWeb) ...[
+            const SizedBox(height: 12),
+            _parentRecoveryTile(context),
+          ],
           const SizedBox(height: 12),
           Card(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -209,52 +256,91 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  Widget _syncTileWidget(BuildContext context) {
-    final sync = context.watch<SyncProvider>();
-    final mode = sync.config.mode;
-    final modeLabel = mode == DeviceMode.main
-        ? 'মেইন ডিভাইস'
-        : mode == DeviceMode.sub
-            ? 'সাব-ডিভাইস'
-            : 'বন্ধ';
-    final modeColor = mode == DeviceMode.main
-        ? AppColors.primary
-        : mode == DeviceMode.sub
-            ? Colors.teal
-            : Colors.grey;
+  Widget _parentRecoveryTile(BuildContext context) {
+    final dev = context.watch<DeviceApprovalProvider>();
+    if (dev.isParent) return const SizedBox.shrink();
 
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: ListTile(
-        leading: Stack(
-          clipBehavior: Clip.none,
+        leading: Icon(Icons.phonelink_setup, color: Colors.orange.shade800, size: 26),
+        title: const Text(
+          'Restore parent on this phone',
+          style: TextStyle(fontWeight: FontWeight.w600),
+        ),
+        subtitle: const Text(
+          'If parent was moved to another device and that phone no longer works',
+          style: TextStyle(fontSize: 12),
+        ),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => _showParentRecoveryDialog(context),
+      ),
+    );
+  }
+
+  void _showParentRecoveryDialog(BuildContext context) {
+    final pinCtrl = TextEditingController();
+    final keyCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Restore parent role'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.sync_alt, color: modeColor, size: 26),
-            if (sync.pendingCount > 0)
-              Positioned(
-                top: -4,
-                right: -4,
-                child: Container(
-                  padding: const EdgeInsets.all(3),
-                  decoration: const BoxDecoration(
-                      color: Colors.orange, shape: BoxShape.circle),
-                  child: Text(
-                    '${sync.pendingCount}',
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 8,
-                        fontWeight: FontWeight.bold),
-                  ),
-                ),
+            const Text(
+              'এই ফোনটিকে প্যারেন্ট করবে। সাইনআপের Security PIN দিন। '
+              'মডেল লিখতে হবে না — অ্যাপ নিজে এই হ্যান্ডসেট চিনবে।',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: pinCtrl,
+              obscureText: true,
+              keyboardType: TextInputType.number,
+              maxLength: 6,
+              decoration: const InputDecoration(
+                labelText: 'Account security PIN',
+                counterText: '',
+                border: OutlineInputBorder(),
               ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: keyCtrl,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Recovery key (optional)',
+                border: OutlineInputBorder(),
+              ),
+            ),
           ],
         ),
-        title: const Text('SMS Sync সেটিংস',
-            style: TextStyle(fontWeight: FontWeight.w600)),
-        subtitle: Text(modeLabel,
-            style: TextStyle(color: modeColor, fontSize: 12)),
-        trailing: const Icon(Icons.chevron_right),
-        onTap: () => _openSyncSettings(context),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final messenger = ScaffoldMessenger.of(context);
+              await context.read<DeviceApprovalProvider>().ensureInitialized();
+              final err = await recoverParentOnThisDevice(
+                accountPin: pinCtrl.text,
+                recoveryKey: keyCtrl.text,
+              );
+              if (!context.mounted) return;
+              if (err != null) {
+                messenger.showSnackBar(SnackBar(content: Text(err)));
+                return;
+              }
+              await refreshDeviceApprovalAfterRecovery(
+                context.read<DeviceApprovalProvider>(),
+              );
+              messenger.showSnackBar(
+                const SnackBar(content: Text('Parent role restored on this account')),
+              );
+            },
+            child: const Text('Restore'),
+          ),
+        ],
       ),
     );
   }
@@ -267,13 +353,6 @@ class ProfileScreen extends StatelessWidget {
       subtitle: Text(value,
           style:
               const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
-    );
-  }
-
-  void _openSyncSettings(BuildContext context) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const SyncSettingsScreen()),
     );
   }
 

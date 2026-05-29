@@ -6,7 +6,7 @@
 -- 1. users table-এ missing columns যোগ করুন
 ALTER TABLE users
   ADD COLUMN IF NOT EXISTS role              VARCHAR(20)   NOT NULL DEFAULT 'user',
-  ADD COLUMN IF NOT EXISTS pin               VARCHAR(10)   NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS pin               VARCHAR(255)  NOT NULL DEFAULT '',
   ADD COLUMN IF NOT EXISTS balance           DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   ADD COLUMN IF NOT EXISTS blocked           TINYINT(1)    NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS email_verified    TINYINT(1)    NOT NULL DEFAULT 0,
@@ -76,3 +76,49 @@ ALTER TABLE devices
   ADD COLUMN IF NOT EXISTS status ENUM('pending','active') NOT NULL DEFAULT 'active' AFTER custom_name;
 ALTER TABLE devices
   ADD COLUMN IF NOT EXISTS is_parent TINYINT(1) NOT NULL DEFAULT 0 AFTER status;
+
+-- 6. sms_templates — admin dynamic SMS rules (Customer Preview + formats JSON)
+CREATE TABLE IF NOT EXISTS sms_templates (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  customer_preview VARCHAR(128) NOT NULL,
+  sender_id VARCHAR(64) NOT NULL DEFAULT '',
+  formats JSON NOT NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_sms_templates_preview (customer_preview, is_active)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 7. parsed_payments — structured payment SMS from Flutter (7 API fields)
+CREATE TABLE IF NOT EXISTS parsed_payments (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  device_id VARCHAR(255) DEFAULT NULL,
+  sim_slot TINYINT DEFAULT NULL,
+  sim_number VARCHAR(32) DEFAULT NULL COMMENT 'legacy alias of receiver_number',
+  receiver_number VARCHAR(32) DEFAULT NULL COMMENT 'user SIM that received SMS',
+  provider_tag VARCHAR(128) NOT NULL DEFAULT '' COMMENT 'e.g. bKash Personal',
+  amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+  trx_id VARCHAR(64) NOT NULL DEFAULT '',
+  sender_number VARCHAR(32) DEFAULT NULL COMMENT 'payer phone from SMS body',
+  sms_timestamp DATETIME NOT NULL,
+  sms_date DATE DEFAULT NULL,
+  sms_time VARCHAR(16) DEFAULT NULL,
+  raw_body TEXT COMMENT 'legacy alias of full_sms',
+  full_sms TEXT NOT NULL COMMENT 'complete raw SMS text',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_parsed_user_time (user_id, sms_timestamp),
+  INDEX idx_parsed_trx (user_id, trx_id),
+  CONSTRAINT fk_parsed_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE parsed_payments ADD COLUMN IF NOT EXISTS receiver_number VARCHAR(32) DEFAULT NULL;
+ALTER TABLE parsed_payments ADD COLUMN IF NOT EXISTS sms_date DATE DEFAULT NULL;
+ALTER TABLE parsed_payments ADD COLUMN IF NOT EXISTS sms_time VARCHAR(16) DEFAULT NULL;
+ALTER TABLE parsed_payments ADD COLUMN IF NOT EXISTS full_sms TEXT;
+
+ALTER TABLE sms_records ADD COLUMN IF NOT EXISTS sim_slot TINYINT DEFAULT NULL;
+ALTER TABLE sms_records ADD COLUMN IF NOT EXISTS sim_number VARCHAR(32) DEFAULT NULL;
+ALTER TABLE sms_records ADD COLUMN IF NOT EXISTS provider_tag VARCHAR(64) DEFAULT NULL;
+ALTER TABLE sms_records ADD COLUMN IF NOT EXISTS trx_id VARCHAR(64) DEFAULT NULL;
+ALTER TABLE sms_records ADD COLUMN IF NOT EXISTS sender_number VARCHAR(32) DEFAULT NULL;

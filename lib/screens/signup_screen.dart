@@ -4,9 +4,12 @@ import 'package:provider/provider.dart';
 
 import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
+import '../utils/bd_phone_utils.dart';
 import '../utils/constants.dart';
-
-const _bdPrefixes = ['013', '014', '015', '016', '017', '018', '019'];
+import '../utils/gmail_input_utils.dart';
+import '../utils/pin_validation.dart';
+import '../widgets/custom_email_field.dart';
+import '../widgets/custom_mobile_field.dart';
 
 class SignupScreen extends StatefulWidget {
   final VoidCallback onComplete;
@@ -26,6 +29,21 @@ class _SignupScreenState extends State<SignupScreen> {
   bool _pinVisible    = false;
 
   @override
+  void initState() {
+    super.initState();
+    void refresh() {
+      if (mounted) setState(() {});
+    }
+    _nameCtrl.addListener(refresh);
+    _pinCtrl.addListener(refresh);
+  }
+
+  bool get _canSubmitSignup {
+    if (_nameCtrl.text.trim().length < 2) return false;
+    return canSubmitSecurityPin(_pinCtrl.text);
+  }
+
+  @override
   void dispose() {
     _nameCtrl.dispose();
     _pinCtrl.dispose();
@@ -39,30 +57,12 @@ class _SignupScreenState extends State<SignupScreen> {
     return null;
   }
 
-  String? _validatePin(String? v) {
-    if (v == null || v.trim().isEmpty) return 'পিন দিন';
-    if (v.length != 4 && v.length != 6) return 'পিন অবশ্যই ৪ বা ৬ ডিজিটের হতে হবে';
-    return null;
-  }
+  String? _validatePin(String? v) => validateSecurityPin(v);
 
-  String? _validatePhone(String? v) {
-    if (v == null || v.trim().isEmpty) return 'মোবাইল নম্বর দিন';
-    final s = v.trim();
-    if (s.length != 11) return 'মোবাইল নম্বর অবশ্যই ১১ সংখ্যার হতে হবে';
-    if (!_bdPrefixes.contains(s.substring(0, 3))) {
-      return 'বাংলাদেশি অপারেটর কোড দিন (013–019)';
-    }
-    return null;
-  }
+  String? _validatePhone(String? v) => BdPhoneUtils.validate(v);
 
-  String? _validateEmail(String? v) {
-    if (v == null || v.trim().isEmpty) return null; // optional
-    final s = v.trim();
-    if (!RegExp(r'^[^\s@]+@gmail\.com$', caseSensitive: false).hasMatch(s)) {
-      return 'শুধু @gmail.com ঠিকানা গ্রহণযোগ্য';
-    }
-    return null;
-  }
+  String? _validateEmail(String? v) =>
+      GmailInputUtils.validate(v, required: false);
 
   Future<void> _submit(bool isPhone, String contact) async {
     if (!_formKey.currentState!.validate()) return;
@@ -76,10 +76,14 @@ class _SignupScreenState extends State<SignupScreen> {
     final String email;
     if (isPhone) {
       phone = ApiService.normalizeContactForApi(contact);
-      email = opt.isEmpty ? '' : ApiService.normalizeContactForApi(opt);
+      email = opt.isEmpty
+          ? ''
+          : CustomEmailField.readApiValue(_optionalCtrl);
     } else {
       email = ApiService.normalizeContactForApi(contact);
-      phone = opt.isEmpty ? '' : ApiService.normalizeContactForApi(opt);
+      phone = opt.isEmpty
+          ? ''
+          : BdPhoneUtils.sanitize(_optionalCtrl.text);
     }
 
     try {
@@ -154,11 +158,18 @@ class _SignupScreenState extends State<SignupScreen> {
                     controller: _pinCtrl,
                     obscureText: !_pinVisible,
                     keyboardType: TextInputType.number,
-                    maxLength: 6,
+                    maxLength: 7,
                     inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                     decoration: InputDecoration(
-                      labelText: 'একটি ৪ বা ৬ ডিজিটের পিন',
+                      labelText: 'পিন (৪–৬ সংখ্যা)',
                       labelStyle: const TextStyle(fontSize: 13),
+                      helperText: securityPinLengthHint(_pinCtrl.text),
+                      helperStyle: TextStyle(
+                        color: securityPinDigitCount(_pinCtrl.text) > 6
+                            ? Colors.red
+                            : Colors.green.shade700,
+                        fontSize: 12,
+                      ),
                       prefixIcon: const Icon(Icons.lock_outline),
                       counterText: '',
                       border: OutlineInputBorder(
@@ -186,20 +197,24 @@ class _SignupScreenState extends State<SignupScreen> {
 
                   // ── Optional / Required contact ───────────────────────────
                   if (isPhone) ...[
-                    _buildField(
+                    CustomEmailField(
                       controller: _optionalCtrl,
-                      label: 'আপনার জিমেইল এড্রেস (ঐচ্ছিক)',
-                      icon: Icons.email_outlined,
-                      keyboardType: TextInputType.emailAddress,
+                      required: false,
+                      labelText: 'আপনার জিমেইল এড্রেস (ঐচ্ছিক — খালি রাখতে পারেন)',
+                      decoration: _fieldDecoration(
+                        Icons.email_outlined,
+                        'আপনার জিমেইল এড্রেস (ঐচ্ছিক — খালি রাখতে পারেন)',
+                      ),
                       validator: _validateEmail,
                     ),
                   ] else ...[
-                    _buildField(
+                    CustomMobileField(
                       controller: _optionalCtrl,
-                      label: 'আপনার মোবাইল নাম্বার',
-                      icon: Icons.phone_outlined,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      labelText: 'আপনার মোবাইল নাম্বার (আবশ্যক)',
+                      decoration: _fieldDecoration(
+                        Icons.phone_outlined,
+                        'আপনার মোবাইল নাম্বার (আবশ্যক)',
+                      ),
                       validator: _validatePhone,
                     ),
                   ],
@@ -207,7 +222,9 @@ class _SignupScreenState extends State<SignupScreen> {
 
                   // ── Submit ────────────────────────────────────────────────
                   ElevatedButton(
-                    onPressed: _saving ? null : () => _submit(isPhone, contact),
+                    onPressed: (_saving || !_canSubmitSignup)
+                        ? null
+                        : () => _submit(isPhone, contact),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
                       foregroundColor: Colors.white,
@@ -233,6 +250,23 @@ class _SignupScreenState extends State<SignupScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  InputDecoration _fieldDecoration(IconData icon, String label) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(fontSize: 13),
+      prefixIcon: Icon(icon),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: Colors.grey.shade300),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: AppColors.primary, width: 2),
       ),
     );
   }

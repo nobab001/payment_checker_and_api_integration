@@ -6,6 +6,8 @@ class UserModel {
   final String role;
   final String email;
   final String pin;
+  final bool pinConfigured;
+  final bool profileComplete;
   final bool emailVerified;
   final bool blocked;
 
@@ -22,14 +24,17 @@ class UserModel {
     required this.role,
     required this.email,
     this.pin = '',
+    this.pinConfigured = false,
+    this.profileComplete = false,
     this.emailVerified = false,
     this.blocked = false,
     this.balance = 0,
     this.historyPremiumUntil,
   });
 
-  /// `true` when the user must finish onboarding (name / profile) in-app.
-  bool get needsProfileCompletion => name.trim().isEmpty;
+  /// `true` when the user must finish onboarding (name / PIN) in-app.
+  bool get needsProfileCompletion =>
+      !profileComplete && name.trim().isEmpty;
 
   static String _stringId(dynamic v) {
     if (v == null) return '';
@@ -65,6 +70,12 @@ class UserModel {
       role: (m['role'] as String?) ?? 'user',
       email: (m['email'] as String?) ?? '',
       pin: (m['pin'] as String?) ?? '',
+      pinConfigured: (m['pinConfigured'] as bool?) ??
+          (m['pin_configured'] as bool?) ??
+          ((m['pin'] as String?)?.isNotEmpty == true),
+      profileComplete: (m['profileComplete'] as bool?) ??
+          (m['profile_complete'] as bool?) ??
+          false,
       emailVerified: (m['emailVerified'] as bool?) ??
           (m['email_verified'] as bool?) ??
           false,

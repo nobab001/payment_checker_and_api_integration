@@ -43,3 +43,12 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Node / Server related
+node_modules/
+**/node_modules/
+.env
+server/.env
+server/debug.log
+server/server.log
+localhost

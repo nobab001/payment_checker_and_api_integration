@@ -2,19 +2,24 @@ import 'dart:async';
 
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:android_id/android_id.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../providers/auth_provider.dart';
+import '../providers/device_approval_provider.dart';
 import '../providers/remote_config_provider.dart';
 import '../services/api_service.dart';
 import '../services/otp_service.dart';
+import '../utils/bd_phone_utils.dart';
 import '../utils/constants.dart';
-
-const _bdPrefixes = ['013', '014', '015', '016', '017', '018', '019'];
+import '../utils/gmail_input_utils.dart';
+import '../widgets/custom_login_contact_field.dart';
+import '../widgets/custom_otp_field.dart';
+import '../widgets/device_bound_dialog.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -80,55 +85,105 @@ class _LoginScreenState extends State<LoginScreen> {
 
   String? _validateContact(String? v) {
     if (v == null || v.trim().isEmpty) return 'এই ঘর পূরণ করুন';
-    final s = v.trim();
-    if (_isPhone(s)) {
-      if (s.length != 11) return 'মোবাইল নম্বর অবশ্যই ১১ সংখ্যার হতে হবে';
-      if (!_bdPrefixes.contains(s.substring(0, 3))) {
-        return 'বাংলাদেশি অপারেটর কোড দিন (013–019)';
-      }
-      return null;
+    if (CustomLoginContactField.looksLikeEmail(v)) {
+      return GmailInputUtils.validate(v);
     }
-    if (s.contains('@')) {
-      if (!RegExp(r'^[^\s@]+@gmail\.com$', caseSensitive: false).hasMatch(s)) {
-        return 'শুধু @gmail.com ঠিকানা গ্রহণযোগ্য';
-      }
-      return null;
-    }
-    return 'সঠিক মোবাইল নম্বর অথবা Gmail দিন';
+    return BdPhoneUtils.validate(v);
   }
 
-  bool _isPhone(String s) => RegExp(r'^\d+$').hasMatch(s);
+  bool _isPhone(String s) =>
+      !CustomLoginContactField.looksLikeEmail(s) && BdPhoneUtils.isValid(s);
 
   String get _contactForApi =>
-      ApiService.normalizeContactForApi(_emailCtrl.text);
+      CustomLoginContactField.readApiValue(_emailCtrl);
 
   String _connectivityMessage(ApiException e) {
-    const tip = '\n\nটিপ: API ঠিকানা বদলাতে Profile → SMS filter & forward। USB তে adb reverse tcp:3000 tcp:3000';
+    // Server's own message for business errors (wrong OTP, account exists, etc.).
+    // All transport / infra failures collapse to one professional line.
     switch (e.code) {
       case 'connection_failed':
-        return e.message;
       case 'network_refused':
-        return 'সার্ভার চালু নেই বা পোর্ট বন্ধ — Node API চালু আছে কিনা দেখুন$tip';
       case 'network_dns':
-        return 'সার্ভার ঠিকানা খুঁজে পাওয়া যায়নি — URL বা DNS পরীক্ষা করুন$tip';
       case 'network_routing':
-        return 'নেটওয়ার্ক রুট নেই — কানেকশন বা VPN পরীক্ষা করুন$tip';
       case 'network':
-        return 'ইন্টারনেট বা সার্ভার কানেকশন নেই — পরে আবার চেষ্টা করুন$tip';
       case 'timeout':
-        return 'সার্ভার রেসপন্স দেরি করছে — কিছুক্ষণ পর আবার চেষ্টা করুন$tip';
-      case 'bad_response':
-        return 'সার্ভার থেকে সঠিক ডেটা পাওয়া যায়নি';
+        return 'Server unreachable';
       default:
         final t = e.message.trim();
-        if (t.isEmpty || t == 'Request failed' || t.length > 120) {
-          return 'সার্ভারে সমস্যা — আবার চেষ্টা করুন';
+        if (t.isEmpty || t == 'Request failed' || t.length > 200) {
+          return 'Server unreachable';
         }
         return t;
     }
   }
 
   // ── Actions ───────────────────────────────────────────────────────────────
+
+  Future<String?> _readHardwareDeviceId() async {
+    if (kIsWeb) return null;
+    try {
+      return await const AndroidId().getId();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Device lock before OTP — same policy as verify-otp, runs on "যাচাই করুন".
+  Future<bool> _ensureDeviceAllowsLogin(String contact) async {
+    final hwId = await _readHardwareDeviceId();
+    if (hwId == null || hwId.isEmpty) return true;
+
+    final check = await ApiService.instance.checkDeviceLoginEligibility(
+      contact,
+      deviceId: hwId,
+    );
+    if (check.allowed) return true;
+
+    if (mounted) {
+      _showDeviceBoundDialog(
+        phones: check.boundPhones,
+        emails: check.boundEmails,
+      );
+    }
+    return false;
+  }
+
+  bool _isDeviceBoundMessage(String? message) {
+    final m = message ?? '';
+    return m.contains('ডিভাইসটি') ||
+        m.contains('লিংক করা রয়েছে') ||
+        m.contains('DEVICE_BOUND');
+  }
+
+  void _showDeviceBoundDialog({
+    List<String> phones = const [],
+    List<String> emails = const [],
+  }) {
+    if (!mounted) return;
+    DeviceBoundDialog.show(
+      context,
+      phones: phones,
+      emails: emails,
+    );
+  }
+
+  void _showDeviceBoundMessage(String message) {
+    final phones = <String>[];
+    final emails = <String>[];
+    final match = RegExp(r'\(([^)]+)\)').firstMatch(message);
+    if (match != null) {
+      for (final part in match.group(1)!.split(',')) {
+        final s = part.trim();
+        if (s.isEmpty) continue;
+        if (s.contains('@')) {
+          emails.add(s);
+        } else {
+          phones.add(s);
+        }
+      }
+    }
+    _showDeviceBoundDialog(phones: phones, emails: emails);
+  }
 
   /// Called when user taps "যাচাই করুন" (Verify button).
   Future<void> _onVerify() async {
@@ -144,10 +199,7 @@ class _LoginScreenState extends State<LoginScreen> {
         if (!online) {
           if (!mounted) return;
           setState(() => _sendingOtp = false);
-          _showSnackbar(
-            'কোনো ইন্টারনেট কানেকশন নেই — Wi‑Fi বা মোবাইল ডেটা চালু করুন',
-            Colors.red[700]!,
-          );
+          _showSnackbar('No internet connection', Colors.red[700]!);
           return;
         }
       } catch (_) {
@@ -161,11 +213,25 @@ class _LoginScreenState extends State<LoginScreen> {
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() => _sendingOtp = false);
-      _showSnackbar(_connectivityMessage(e), Colors.red[700]!);
+      _showConnectivitySnack(e);
       return;
     }
 
-    // 2. Check whether account exists
+    // 2. Device binding (before OTP is sent)
+    try {
+      if (!await _ensureDeviceAllowsLogin(input)) {
+        if (!mounted) return;
+        setState(() => _sendingOtp = false);
+        return;
+      }
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _sendingOtp = false);
+      _showConnectivitySnack(e);
+      return;
+    }
+
+    // 3. Check whether account exists
     try {
       final exists = await ApiService.instance.checkContactExists(input);
       if (!mounted) return;
@@ -184,13 +250,13 @@ class _LoginScreenState extends State<LoginScreen> {
       if (e.statusCode == 429) {
         _startServerCooldown(10);
       } else {
-        _showSnackbar(_connectivityMessage(e), Colors.red[700]!);
+        _showConnectivitySnack(e);
       }
     } on Exception catch (_) {
       // Connection errors (SocketException, timeout, etc.) → show error message
       if (!mounted) return;
       setState(() => _sendingOtp = false);
-      _showSnackbar('সংযোগ ব্যর্থ হয়েছে — আবার চেষ্টা করুন', Colors.red[700]!);
+      _showSnackbar('Server unreachable', Colors.red[700]!);
     }
   }
 
@@ -295,7 +361,11 @@ class _LoginScreenState extends State<LoginScreen> {
       _sendingOtp = true;
       _isNewUser = false;
     });
-    final result = await OtpService.instance.sendOtp(_contactForApi);
+    final hwId = await _readHardwareDeviceId();
+    final result = await OtpService.instance.sendOtp(
+      _contactForApi,
+      deviceId: hwId,
+    );
     if (!mounted) return;
     if (result.success) {
       setState(() {
@@ -310,6 +380,8 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() => _sendingOtp = false);
       if (result.error == OtpError.rateLimited) {
         _startServerCooldown(10);
+      } else if (_isDeviceBoundMessage(result.message)) {
+        _showDeviceBoundMessage(result.message!);
       } else {
         _showSnackbar(result.message ?? 'OTP পাঠানো যায়নি', Colors.red[700]!);
       }
@@ -322,7 +394,29 @@ class _LoginScreenState extends State<LoginScreen> {
       _sendingOtp = true;
       _isNewUser = true;
     });
-    final result = await OtpService.instance.sendOtpNew(_contactForApi);
+    try {
+      if (!await _ensureDeviceAllowsLogin(_contactForApi)) {
+        if (!mounted) return;
+        setState(() {
+          _sendingOtp = false;
+          _isNewUser = false;
+        });
+        return;
+      }
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _sendingOtp = false;
+        _isNewUser = false;
+      });
+      _showConnectivitySnack(e);
+      return;
+    }
+    final hwId = await _readHardwareDeviceId();
+    final result = await OtpService.instance.sendOtpNew(
+      _contactForApi,
+      deviceId: hwId,
+    );
     if (!mounted) return;
     if (result.success) {
       setState(() {
@@ -347,6 +441,8 @@ class _LoginScreenState extends State<LoginScreen> {
         await _sendOtp();
       } else if (result.error == OtpError.rateLimited) {
         _startServerCooldown(10);
+      } else if (_isDeviceBoundMessage(result.message)) {
+        _showDeviceBoundMessage(result.message!);
       } else {
         _showSnackbar(result.message ?? 'OTP পাঠানো যায়নি', Colors.red[700]!);
       }
@@ -362,7 +458,25 @@ class _LoginScreenState extends State<LoginScreen> {
     }
     setState(() => _verifying = true);
     final input = _contactForApi;
-    final result = await OtpService.instance.verifyOtp(input, code);
+    String? hwId;
+    String deviceModel = '';
+    if (!kIsWeb) {
+      try {
+        hwId = await const AndroidId().getId();
+        final android = await DeviceInfoPlugin().androidInfo;
+        final brand = android.brand.trim();
+        final model = android.model.trim();
+        deviceModel = brand.isNotEmpty && model.isNotEmpty
+            ? '$brand $model'
+            : (model.isNotEmpty ? model : android.device.trim());
+      } catch (_) {}
+    }
+    final result = await OtpService.instance.verifyOtp(
+      input,
+      code,
+      deviceId: hwId,
+      deviceModel: deviceModel.isNotEmpty ? deviceModel : null,
+    );
     if (!mounted) return;
     if (result.success && result.token != null) {
       final auth = context.read<AuthProvider>();
@@ -374,8 +488,19 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!ok && mounted && auth.error != null) {
         setState(() => _verifying = false);
         _showSnackbar(auth.error!, Colors.red[700]!);
+      } else if (ok) {
+        auth.setPendingDevicePinRequired(result.requiresSecurityPin);
+        if (hwId != null && hwId.isNotEmpty && result.device != null) {
+          if (!mounted) return;
+          final devProv = context.read<DeviceApprovalProvider>();
+          await devProv.ingestLoginDevice(
+            hwId,
+            result.device!,
+          );
+        }
+        if (mounted) setState(() => _verifying = false);
       }
-      // On success _AuthGate routes automatically
+      // On success _AuthGate routes; device init runs in _HomeLoader
     } else {
       setState(() => _verifying = false);
       _showSnackbar(result.message ?? 'যাচাই ব্যর্থ হয়েছে', Colors.red[700]!);
@@ -408,41 +533,11 @@ class _LoginScreenState extends State<LoginScreen> {
     });
   }
 
-  void _onOtpDigit(int i, String val) {
-    // ── 1. Full 6-digit paste into any box → distribute and auto-verify ──
-    if (val.length == 6 && RegExp(r'^\d{6}$').hasMatch(val)) {
-      for (int j = 0; j < 6; j++) {
-        _otpCtrl[j].value = TextEditingValue(text: val[j]);
-      }
-      _onLoginWithOtp();
-      return;
-    }
-
-    // Keep only the LAST typed digit (overwrite behavior).
-    if (val.length > 1) {
-      final keep = val.substring(val.length - 1);
-      _otpCtrl[i].value = TextEditingValue(
-        text: keep,
-        selection: TextSelection.collapsed(offset: keep.length),
-      );
-      if (i < 5) _otpFocus[i + 1].requestFocus();
-      return;
-    }
-
-    // ── 3. Single digit typed normally ──
-    if (val.length == 1 && i < 5) {
-      _otpFocus[i + 1].requestFocus();
-    }
-    // ── 4. Box was cleared (backspace on a filled box) → stay here, do nothing.
-    //      Backspace on an EMPTY box is handled in _onOtpBackspace below.
-  }
-
-  /// Called when the user presses backspace AND the current box is already empty.
-  /// Behaviour: move to the previous box AND clear its digit.
-  void _onOtpBackspace(int i) {
-    if (i <= 0) return;
-    _otpCtrl[i - 1].clear();
-    _otpFocus[i - 1].requestFocus();
+  void _showConnectivitySnack(ApiException e) {
+    _showSnackbar(
+      _connectivityMessage(e),
+      Colors.red[700]!,
+    );
   }
 
   void _showSnackbar(String msg, Color bg) {
@@ -452,9 +547,7 @@ class _LoginScreenState extends State<LoginScreen> {
         content: Text(msg),
         backgroundColor: bg,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
     );
   }
@@ -494,6 +587,245 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  static const _hPad = 24.0;
+  static const _alertToOtpGap = 18.0;
+  /// OTP বক্স–লগইন বাটনের মাঝের ফাঁক; টাইমার মাঝখানে (আগের ফাঁক − ৭dp)।
+  static const _otpToLoginBridgeHeight = 40.0;
+  static const _loginToSocialGap = 20.0;
+
+  InputDecoration get _contactDecoration => InputDecoration(
+        labelText: 'মোবাইল নম্বর অথবা Gmail এড্রেস',
+        labelStyle: const TextStyle(fontSize: 13),
+        prefixIcon: const Icon(Icons.person_outline),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: Colors.grey.shade300),
+        ),
+        disabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: Colors.grey.shade200),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: AppColors.primary, width: 2),
+        ),
+      );
+
+  Widget _buildMaintenanceBanner() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: Colors.orange.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.orange.shade300),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.construction, color: Colors.orange.shade700, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'অ্যাপটি সাময়িকভাবে রক্ষণাবেক্ষণের জন্য বন্ধ আছে',
+              style: TextStyle(color: Colors.orange.shade800, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Column(
+      children: const [
+        Icon(Icons.account_balance_wallet, size: 64, color: AppColors.primary),
+        SizedBox(height: 12),
+        Text(
+          AppStrings.appName,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+            color: AppColors.primary,
+          ),
+        ),
+        SizedBox(height: 6),
+        Text(
+          'SMS পেমেন্ট ট্র্যাকার',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.grey, fontSize: 13),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOtpSentBanner() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: _isNewUser ? Colors.green.shade50 : Colors.blue.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: _isNewUser ? Colors.green.shade200 : Colors.blue.shade200,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            _isNewUser ? Icons.person_add_outlined : Icons.sms_outlined,
+            color: _isNewUser ? Colors.green.shade700 : Colors.blue.shade700,
+            size: 20,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              _isNewUser
+                  ? '${_emailCtrl.text.trim()}-এ নিশ্চিতকরণ কোড পাঠানো হয়েছে'
+                  : '${_emailCtrl.text.trim()}-এ ৬ সংখ্যার কোড পাঠানো হয়েছে',
+              style: TextStyle(
+                color: _isNewUser ? Colors.green.shade800 : Colors.blue.shade800,
+                fontSize: 13,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOtpResendLine({required bool busy}) {
+    if (_cooldown > 0) {
+      return Text(
+        '${_cooldown}s পরে আবার পাঠান',
+        style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
+      );
+    }
+    return TextButton(
+      style: TextButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        visualDensity: VisualDensity.compact,
+      ),
+      onPressed: busy ? null : (_isNewUser ? _sendOtpNew : _sendOtp),
+      child: const Text(
+        'কোড আবার পাঠান',
+        style: TextStyle(color: AppColors.primary, fontSize: 13),
+      ),
+    );
+  }
+
+  Widget _buildOtpSection({required bool busy, required bool rateLimited}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildOtpSentBanner(),
+        const SizedBox(height: _alertToOtpGap),
+        CustomOtpField(
+          controllers: _otpCtrl,
+          focusNodes: _otpFocus,
+          enabled: !busy && !rateLimited,
+          onAutoSubmit: (_) async {
+            if (!_verifying && mounted) await _onLoginWithOtp();
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRateLimitBanner() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.amber.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.amber.shade300),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.hourglass_top_rounded, color: Colors.amber.shade800, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'অনেকবার চেষ্টা করা হয়েছে',
+                  style: TextStyle(
+                    color: Colors.amber.shade900,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Text(
+                  'অনুগ্রহ করে $_serverCooldown সেকেন্ড অপেক্ষা করুন',
+                  style: TextStyle(color: Colors.amber.shade800, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: Colors.amber.shade100,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.amber.shade400, width: 2),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              '$_serverCooldown',
+              style: TextStyle(
+                color: Colors.amber.shade900,
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLoginButton({
+    required bool busy,
+    required bool appDisabled,
+    required bool rateLimited,
+  }) {
+    return ElevatedButton(
+      onPressed: busy || appDisabled || rateLimited
+          ? null
+          : (_showOtp ? _onLoginWithOtp : _onVerify),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: AppColors.primary,
+        foregroundColor: Colors.white,
+        disabledBackgroundColor: Colors.grey.shade400,
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        elevation: 2,
+      ),
+      child: busy
+          ? const SizedBox(
+              height: 20,
+              width: 20,
+              child: CircularProgressIndicator(
+                color: Colors.white,
+                strokeWidth: 2,
+              ),
+            )
+          : Text(
+              rateLimited
+                  ? '$_serverCooldown সেকেন্ড অপেক্ষা করুন'
+                  : (_showOtp
+                        ? (_isNewUser ? 'নিশ্চিত করুন' : 'লগইন করুন')
+                        : 'যাচাই করুন'),
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+    );
+  }
+
   // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
@@ -507,445 +839,154 @@ class _LoginScreenState extends State<LoginScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // ── Maintenance banner ─────────────────────────────────
-                  if (appDisabled) ...[
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 14,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.shade50,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.orange.shade300),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.construction,
-                            color: Colors.orange.shade700,
-                            size: 20,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: _hPad),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: Align(
+                  alignment: const Alignment(0, -0.1),
+                  child: Form(
+                    key: _formKey,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (appDisabled) ...[
+                          _buildMaintenanceBanner(),
+                          const SizedBox(height: 16),
+                        ],
+                        _buildHeader(),
+                        const SizedBox(height: 32),
+                        CustomLoginContactField(
+                          controller: _emailCtrl,
+                          enabled: !_showOtp,
+                          onContactChanged: () {
+                            if (_showOtp) {
+                              setState(() {
+                                _showOtp = false;
+                                _isNewUser = false;
+                                _clearOtp();
+                              });
+                            }
+                          },
+                          decoration: _contactDecoration,
+                          validator: _validateContact,
+                        ),
+                        if (_showOtp) ...[
+                          const SizedBox(height: 16),
+                          _buildOtpSection(
+                            busy: busy,
+                            rateLimited: rateLimited,
                           ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'অ্যাপটি সাময়িকভাবে রক্ষণাবেক্ষণের জন্য বন্ধ আছে',
-                              style: TextStyle(
-                                color: Colors.orange.shade800,
-                                fontSize: 13,
-                              ),
+                          SizedBox(
+                            height: _otpToLoginBridgeHeight,
+                            child: Center(
+                              child: _buildOtpResendLine(busy: busy),
                             ),
                           ),
                         ],
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                  ],
-
-                  // ── Logo / title ───────────────────────────────────────
-                  const Icon(
-                    Icons.account_balance_wallet,
-                    size: 64,
-                    color: AppColors.primary,
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    AppStrings.appName,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.primary,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    'SMS পেমেন্ট ট্র্যাকার',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey, fontSize: 13),
-                  ),
-                  const SizedBox(height: 40),
-
-                  // ── Contact input ──────────────────────────────────────
-                  TextFormField(
-                    controller: _emailCtrl,
-                    keyboardType: TextInputType.emailAddress,
-                    enabled: !_showOtp,
-                    onChanged: (_) {
-                      if (_showOtp) {
-                        setState(() {
-                          _showOtp = false;
-                          _isNewUser = false;
-                          _clearOtp();
-                        });
-                      }
-                    },
-                    decoration: InputDecoration(
-                      labelText: 'মোবাইল নম্বর অথবা Gmail এড্রেস',
-                      labelStyle: const TextStyle(fontSize: 13),
-                      prefixIcon: const Icon(Icons.person_outline),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide(color: Colors.grey.shade300),
-                      ),
-                      disabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide(color: Colors.grey.shade200),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(
-                          color: AppColors.primary,
-                          width: 2,
-                        ),
-                      ),
-                    ),
-                    validator: _validateContact,
-                  ),
-                  const SizedBox(height: 16),
-
-                  // ── OTP boxes (shown after OTP sent) ───────────────────
-                  if (_showOtp) ...[
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
-                      ),
-                      decoration: BoxDecoration(
-                        color: _isNewUser
-                            ? Colors.green.shade50
-                            : Colors.blue.shade50,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: _isNewUser
-                              ? Colors.green.shade200
-                              : Colors.blue.shade200,
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            _isNewUser
-                                ? Icons.person_add_outlined
-                                : Icons.sms_outlined,
-                            color: _isNewUser
-                                ? Colors.green.shade700
-                                : Colors.blue.shade700,
-                            size: 18,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              _isNewUser
-                                  ? '${_emailCtrl.text.trim()}-এ নিশ্চিতকরণ কোড পাঠানো হয়েছে'
-                                  : '${_emailCtrl.text.trim()}-এ ৬ সংখ্যার কোড পাঠানো হয়েছে',
-                              style: TextStyle(
-                                color: _isNewUser
-                                    ? Colors.green.shade800
-                                    : Colors.blue.shade800,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
+                        if (rateLimited) ...[
+                          SizedBox(height: _showOtp ? 12 : 10),
+                          _buildRateLimitBanner(),
                         ],
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: List.generate(
-                        6,
-                        (i) => _OtpBox(
-                          controller: _otpCtrl[i],
-                          focusNode: _otpFocus[i],
-                          onChanged: (v) => _onOtpDigit(i, v),
-                          onBackspaceOnEmpty: () => _onOtpBackspace(i),
+                        if (!_showOtp) const SizedBox(height: 16),
+                        _buildLoginButton(
+                          busy: busy,
+                          appDisabled: appDisabled,
+                          rateLimited: rateLimited,
                         ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Center(
-                      child: _cooldown > 0
-                          ? Text(
-                              '${_cooldown}s পরে আবার পাঠান',
-                              style: TextStyle(
-                                color: Colors.grey.shade500,
-                                fontSize: 12,
-                              ),
-                            )
-                          : TextButton(
-                              onPressed: busy
-                                  ? null
-                                  : (_isNewUser ? _sendOtpNew : _sendOtp),
-                              child: const Text(
-                                'কোড আবার পাঠান',
-                                style: TextStyle(color: AppColors.primary),
-                              ),
-                            ),
-                    ),
-                    const SizedBox(height: 6),
-                  ],
-
-                  // ── Server rate-limit banner (Too Many Requests) ───────
-                  if (rateLimited) ...[
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 12,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.amber.shade50,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.amber.shade300),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.hourglass_top_rounded,
-                            color: Colors.amber.shade800,
-                            size: 22,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'অনেকবার চেষ্টা করা হয়েছে',
-                                  style: TextStyle(
-                                    color: Colors.amber.shade900,
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                Text(
-                                  'অনুগ্রহ করে $_serverCooldown সেকেন্ড অপেক্ষা করুন',
-                                  style: TextStyle(
-                                    color: Colors.amber.shade800,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              color: Colors.amber.shade100,
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: Colors.amber.shade400,
-                                width: 2,
-                              ),
-                            ),
-                            alignment: Alignment.center,
-                            child: Text(
-                              '$_serverCooldown',
-                              style: TextStyle(
-                                color: Colors.amber.shade900,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-
-                  // ── Main action button ─────────────────────────────────
-                  ElevatedButton(
-                    onPressed: busy || appDisabled || rateLimited
-                        ? null
-                        : (_showOtp ? _onLoginWithOtp : _onVerify),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      foregroundColor: Colors.white,
-                      disabledBackgroundColor: Colors.grey.shade400,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      elevation: 2,
-                    ),
-                    child: busy
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
-                            ),
-                          )
-                        : Text(
-                            rateLimited
-                                ? '$_serverCooldown সেকেন্ড অপেক্ষা করুন'
-                                : (_showOtp
-                                      ? (_isNewUser
-                                            ? 'নিশ্চিত করুন'
-                                            : 'লগইন করুন')
-                                      : 'যাচাই করুন'),
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                  ),
-                  const SizedBox(height: 44),
-
-                  // ── Social row ─────────────────────────────────────────
-                  Row(
-                    children: [
-                      Expanded(child: Divider(color: Colors.grey.shade300)),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        child: Text(
-                          'আমাদের সাথে থাকুন',
-                          style: TextStyle(
-                            color: Colors.grey.shade500,
-                            fontSize: 12,
-                          ),
+                        const SizedBox(height: _loginToSocialGap),
+                        _LoginSocialFooter(
+                          onLaunch: _launch,
+                          whatsapp: rc.whatsapp,
+                          facebook: rc.facebook,
+                          telegram: rc.telegram,
+                          youtube: rc.youtube,
                         ),
-                      ),
-                      Expanded(child: Divider(color: Colors.grey.shade300)),
-                    ],
+                        const SizedBox(height: 20),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      _SocialBtn(
-                        icon: FontAwesomeIcons.whatsapp,
-                        color: const Color(0xFF25D366),
-                        label: 'WhatsApp',
-                        onTap: () => _launch(rc.whatsapp),
-                      ),
-                      _SocialBtn(
-                        icon: FontAwesomeIcons.facebook,
-                        color: const Color(0xFF1877F2),
-                        label: 'Facebook',
-                        onTap: () => _launch(rc.facebook),
-                      ),
-                      _SocialBtn(
-                        icon: FontAwesomeIcons.telegram,
-                        color: const Color(0xFF229ED9),
-                        label: 'Telegram',
-                        onTap: () => _launch(rc.telegram),
-                      ),
-                      _SocialBtn(
-                        icon: FontAwesomeIcons.youtube,
-                        color: const Color(0xFFFF0000),
-                        label: 'YouTube',
-                        onTap: () => _launch(rc.youtube),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                ],
+                ),
               ),
-            ),
-          ),
+            );
+          },
         ),
       ),
     );
   }
 }
 
-// ── OTP single digit box ──────────────────────────────────────────────────────
-//
-// • Accepts only ONE digit per box (auto-truncates if user types more).
-// • Auto-advances forward when a digit is entered.
-// • Detects a 6-digit paste in any single box and fans it out (handled by parent).
-// • Detects backspace on an already-empty box and notifies the parent so it can
-//   clear the previous box and move focus back.
+/// Social links directly under the primary login / verify button.
+class _LoginSocialFooter extends StatelessWidget {
+  final void Function(String url) onLaunch;
+  final String whatsapp;
+  final String facebook;
+  final String telegram;
+  final String youtube;
 
-class _OtpBox extends StatelessWidget {
-  final TextEditingController controller;
-  final FocusNode focusNode;
-  final ValueChanged<String> onChanged;
-  final VoidCallback onBackspaceOnEmpty;
-
-  const _OtpBox({
-    required this.controller,
-    required this.focusNode,
-    required this.onChanged,
-    required this.onBackspaceOnEmpty,
+  const _LoginSocialFooter({
+    required this.onLaunch,
+    required this.whatsapp,
+    required this.facebook,
+    required this.telegram,
+    required this.youtube,
   });
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 44,
-      height: 54,
-      // Focus wraps the TextField so we can observe key events that the
-      // TextField itself didn't consume (notably "backspace on empty box").
-      child: Focus(
-        canRequestFocus: false,
-        skipTraversal: true,
-        onKeyEvent: (node, event) {
-          if (event is KeyDownEvent &&
-              event.logicalKey == LogicalKeyboardKey.backspace &&
-              controller.text.isEmpty) {
-            onBackspaceOnEmpty();
-            return KeyEventResult.handled;
-          }
-          return KeyEventResult.ignored;
-        },
-        child: TextFormField(
-          controller: controller,
-          focusNode: focusNode,
-          textAlign: TextAlign.center,
-          keyboardType: TextInputType.number,
-          // maxLength: 6 lets us detect a full 6-digit paste; we truncate
-          // anything else down to 1 char inside the parent's onChanged.
-          maxLength: 6,
-          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          style: const TextStyle(
-            fontSize: 22,
-            fontWeight: FontWeight.bold,
-            color: AppColors.primary,
-          ),
-          decoration: InputDecoration(
-            counterText: '',
-            contentPadding: EdgeInsets.zero,
-            filled: true,
-            fillColor: Colors.grey.shade100,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: Colors.grey.shade300),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            Expanded(child: Divider(color: Colors.grey.shade300)),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text(
+                'আমাদের সাথে থাকুন',
+                style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
+              ),
             ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: Colors.grey.shade300),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: AppColors.primary, width: 2),
-            ),
-          ),
-          onChanged: onChanged,
+            Expanded(child: Divider(color: Colors.grey.shade300)),
+          ],
         ),
-      ),
+        const SizedBox(height: 14),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _SocialBtn(
+              icon: FontAwesomeIcons.whatsapp,
+              color: const Color(0xFF25D366),
+              label: 'WhatsApp',
+              onTap: () => onLaunch(whatsapp),
+            ),
+            _SocialBtn(
+              icon: FontAwesomeIcons.facebook,
+              color: const Color(0xFF1877F2),
+              label: 'Facebook',
+              onTap: () => onLaunch(facebook),
+            ),
+            _SocialBtn(
+              icon: FontAwesomeIcons.telegram,
+              color: const Color(0xFF229ED9),
+              label: 'Telegram',
+              onTap: () => onLaunch(telegram),
+            ),
+            _SocialBtn(
+              icon: FontAwesomeIcons.youtube,
+              color: const Color(0xFFFF0000),
+              label: 'YouTube',
+              onTap: () => onLaunch(youtube),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }
-
-// ── Helper end ────────────────────────────────────────────────────────────────
-
-// ── Social link button ────────────────────────────────────────────────────────
 
 class _SocialBtn extends StatelessWidget {
   final IconData icon;

@@ -53,6 +53,16 @@ CREATE TABLE IF NOT EXISTS otps (
 
 
 -- ============================================================
+-- AUTH: multi-credential + device lock (see migrations/002_*.sql)
+-- ============================================================
+-- user_credentials: many phones/emails per account (max 5 each, app-enforced)
+-- user_devices:     global UNIQUE(device_id) — one device → one account
+--
+-- Full DDL + backfill: server/migrations/002_multi_credential_device_lock.sql
+-- Runtime init:        server/services/authSchemaInit.js (on server start)
+
+
+-- ============================================================
 -- OPTIONAL: settings table (not required by the Node server)
 -- ============================================================
 -- CREATE TABLE IF NOT EXISTS settings (

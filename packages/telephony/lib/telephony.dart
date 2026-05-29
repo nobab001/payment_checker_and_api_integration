@@ -570,6 +570,8 @@ class SmsMessage {
   bool? seen;
   String? subject;
   int? subscriptionId;
+  /// Physical SIM slot from native resolver: 0 = SIM 1, 1 = SIM 2.
+  int? simSlotIndex;
   int? threadId;
   SmsType? type;
   SmsStatus? status;
@@ -643,6 +645,15 @@ class SmsMessage {
           break;
       }
     }
+    final slotRaw = message['sim_slot_index'];
+    if (slotRaw != null) {
+      simSlotIndex = int.tryParse(slotRaw.toString());
+    }
+    final subRaw = message['subscription_id'];
+    if (subRaw != null) {
+      final parsed = int.tryParse(subRaw.toString());
+      if (parsed != null) subscriptionId = parsed;
+    }
   }
 
   /// ## Do not call this method. This method is visible only for testing.
@@ -657,6 +668,7 @@ class SmsMessage {
         this.seen == other.seen &&
         this.subject == other.subject &&
         this.subscriptionId == other.subscriptionId &&
+        this.simSlotIndex == other.simSlotIndex &&
         this.threadId == other.threadId &&
         this.type == other.type &&
         this.status == other.status;

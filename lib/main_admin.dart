@@ -10,13 +10,12 @@
 // Firebase project : payment-checker-4049e  (shared with User App)
 // ─────────────────────────────────────────────────────────────────────────────
 
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 // Admin package — added as a path dependency in root pubspec.yaml
-import 'package:payment_checker_admin/firebase_options.dart'
-    as admin_fb;
+import 'package:payment_checker_admin/services/api_service.dart' as admin_api;
+import 'package:payment_checker_admin/services/auth_service.dart' as admin_auth;
 import 'package:payment_checker_admin/providers/auth_provider.dart';
 import 'package:payment_checker_admin/providers/config_provider.dart';
 import 'package:payment_checker_admin/screens/admin_dashboard_screen.dart';
@@ -25,10 +24,8 @@ import 'package:payment_checker_admin/screens/admin_login_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Use admin's own FirebaseOptions (same project, different Android app ID).
-  await Firebase.initializeApp(
-    options: admin_fb.DefaultFirebaseOptions.currentPlatform,
-  );
+  await admin_api.ApiService.instance.init();
+  await admin_auth.AdminAuthService.instance.init();
 
   runApp(const AdminEntryApp());
 }

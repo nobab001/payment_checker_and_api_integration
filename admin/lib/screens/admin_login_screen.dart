@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
+import '../config/api_config.dart';
 
 class AdminLoginScreen extends StatefulWidget {
   const AdminLoginScreen({super.key});
@@ -113,11 +114,92 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                             style: TextStyle(
                                 fontSize: 16, fontWeight: FontWeight.bold)),
                   ),
+                  const SizedBox(height: 16),
+                  Center(
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.settings_ethernet, size: 18, color: Color(0xFF4FC3F7)),
+                      label: const Text(
+                        'Change Server Address',
+                        style: TextStyle(color: Color(0xFF4FC3F7), fontSize: 13),
+                      ),
+                      onPressed: _changeServerAddress,
+                    ),
+                  ),
                 ],
               ),
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  void _changeServerAddress() {
+    final controller = TextEditingController(text: kAdminApiBaseUrl);
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A2E42),
+        title: const Text(
+          'Server Address',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Enter backend URL (e.g. http://192.168.0.116:3000 or ngrok URL):',
+              style: TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                hintText: 'http://192.168.0.116:3000',
+                hintStyle: TextStyle(color: Colors.white30),
+                enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Colors.white38),
+                ),
+                focusedBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(color: Color(0xFF4FC3F7)),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final newUrl = controller.text.trim();
+              if (newUrl.isNotEmpty) {
+                await setAdminApiBaseUrl(newUrl);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Server updated: $newUrl'),
+                      backgroundColor: Colors.green[700],
+                    ),
+                  );
+                }
+              }
+              if (ctx.mounted) {
+                Navigator.of(ctx).pop();
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF4FC3F7),
+              foregroundColor: const Color(0xFF0D1B2A),
+            ),
+            child: const Text('Save'),
+          ),
+        ],
       ),
     );
   }

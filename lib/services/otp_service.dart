@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../models/device_model.dart';
 import '../models/otp_verify_response.dart';
 import '../models/user_model.dart';
 import 'api_service.dart';
@@ -21,11 +22,17 @@ class OtpResult {
   final String? token;
   final bool isNewUser;
   final UserModel? user;
+  final DeviceModel? device;
+  final bool requiresApproval;
+  final bool requiresSecurityPin;
 
   const OtpResult.ok({
     this.token,
     this.isNewUser = false,
     this.user,
+    this.device,
+    this.requiresApproval = false,
+    this.requiresSecurityPin = false,
   })  : success = true,
         error = null,
         message = null;
@@ -34,7 +41,10 @@ class OtpResult {
       : success = false,
         token = null,
         isNewUser = false,
-        user = null;
+        user = null,
+        device = null,
+        requiresApproval = false,
+        requiresSecurityPin = false;
 }
 
 class OtpService {
@@ -43,10 +53,14 @@ class OtpService {
 
   // ── Send OTP to an EXISTING user ──────────────────────────────────────────
   // Calls POST /api/send-otp  with body  { "phone": "<phone or email>" }
-  Future<OtpResult> sendOtp(String contact) async {
+  Future<OtpResult> sendOtp(String contact, {String? deviceId}) async {
     try {
-      final c    = ApiService.normalizeContactForApi(contact);
-      final data = await ApiService.instance.postJson('/api/send-otp', {'phone': c});
+      final c = ApiService.normalizeContactForApi(contact);
+      final body = <String, dynamic>{'phone': c};
+      if (deviceId != null && deviceId.isNotEmpty) {
+        body['deviceId'] = deviceId;
+      }
+      final data = await ApiService.instance.postJson('/api/send-otp', body);
       if (data['success'] == false) {
         return OtpResult.fail(OtpError.unknown, _messageFromBody(data) ?? 'OTP পাঠানো যায়নি');
       }
@@ -62,10 +76,14 @@ class OtpService {
 
   // ── Send OTP to a NEW user (creates account first) ────────────────────────
   // Calls POST /api/send-otp-new  with body  { "phone": "<phone or email>" }
-  Future<OtpResult> sendOtpNew(String contact) async {
+  Future<OtpResult> sendOtpNew(String contact, {String? deviceId}) async {
     try {
-      final c    = ApiService.normalizeContactForApi(contact);
-      final data = await ApiService.instance.postJson('/api/send-otp-new', {'phone': c});
+      final c = ApiService.normalizeContactForApi(contact);
+      final body = <String, dynamic>{'phone': c};
+      if (deviceId != null && deviceId.isNotEmpty) {
+        body['deviceId'] = deviceId;
+      }
+      final data = await ApiService.instance.postJson('/api/send-otp-new', body);
       if (data['success'] == false) {
         final errCode = data['error'] as String?;
         if (errCode == 'ALREADY_EXISTS') {
@@ -86,13 +104,33 @@ class OtpService {
 
   // ── Verify OTP code ───────────────────────────────────────────────────────
   // Calls POST /api/verify-otp  with body  { "phone": "...", "code": "123456" }
-  Future<OtpResult> verifyOtp(String contact, String code) async {
+  Future<OtpResult> verifyOtp(
+    String contact,
+    String code, {
+    String? deviceId,
+    String? deviceModel,
+    String? deviceName,
+    String? securityPin,
+  }) async {
     try {
-      final c    = ApiService.normalizeContactForApi(contact);
-      final data = await ApiService.instance.postJson('/api/verify-otp', {
+      final c = ApiService.normalizeContactForApi(contact);
+      final body = <String, dynamic>{
         'phone': c,
         'code': code.trim(),
-      });
+      };
+      if (deviceId != null && deviceId.isNotEmpty) {
+        body['deviceId'] = deviceId;
+        if (deviceModel != null && deviceModel.isNotEmpty) {
+          body['deviceModel'] = deviceModel;
+        }
+        if (deviceName != null && deviceName.isNotEmpty) {
+          body['deviceName'] = deviceName;
+        }
+      }
+      if (securityPin != null && securityPin.isNotEmpty) {
+        body['securityPin'] = securityPin.trim();
+      }
+      final data = await ApiService.instance.postJson('/api/verify-otp', body);
       final parsed = OtpVerifyResponse.fromJson(data);
       if (!parsed.success) {
         return OtpResult.fail(OtpError.invalid, parsed.message ?? 'যাচাই ব্যর্থ হয়েছে');
@@ -101,7 +139,14 @@ class OtpService {
       if (token == null || token.isEmpty) {
         return const OtpResult.fail(OtpError.unknown, 'সার্ভার টোকেন পাঠায়নি');
       }
-      return OtpResult.ok(token: token, isNewUser: parsed.isNewUser, user: parsed.user);
+      return OtpResult.ok(
+        token: token,
+        isNewUser: parsed.isNewUser,
+        user: parsed.user,
+        device: parsed.device,
+        requiresApproval: parsed.requiresApproval,
+        requiresSecurityPin: parsed.requiresSecurityPin,
+      );
     } on ApiException catch (e) {
       debugPrint('[OtpService] verifyOtp ApiException: status=${e.statusCode} msg=${e.message}');
       return OtpResult.fail(_mapHttp(e.statusCode), _friendlyFromException(e, _bengaliForOtp(e.statusCode)));
@@ -115,6 +160,7 @@ class OtpService {
 
   OtpError _mapHttp(int? status) => switch (status) {
         400 => OtpError.invalid,
+        403 => OtpError.invalid,
         404 => OtpError.notFound,
         409 => OtpError.alreadyUsed,
         410 => OtpError.expired,
@@ -140,22 +186,15 @@ class OtpService {
   }
 
   String _friendlyFromException(ApiException e, String fallback) {
-    const tip = ' API ঠিকানা: Profile → SMS filter & forward।';
     switch (e.code) {
       case 'connection_failed':
-        return e.message;
       case 'network_refused':
-        return 'সার্ভার চালু নেই বা পোর্ট বন্ধ — Node চালু আছে কিনা দেখুন।$tip';
       case 'network_dns':
-        return 'সার্ভার ঠিকানা খুঁজে পাওয়া যায়নি।$tip';
       case 'network_routing':
-        return 'নেটওয়ার্ক রুট নেই — কানেকশন পরীক্ষা করুন।$tip';
       case 'network':
-        return 'ইন্টারনেট বা সার্ভার কানেকশন সমস্যা — আবার চেষ্টা করুন।$tip';
       case 'timeout':
-        return 'সার্ভার রেসপন্স দেরি করছে — কিছুক্ষণ পর আবার চেষ্টা করুন';
       case 'bad_response':
-        return 'সার্ভার থেকে সঠিক ডেটা পাওয়া যায়নি';
+        return 'Server unreachable';
       default:
         return _friendlyServerMessage(e.message, fallback);
     }

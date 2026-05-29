@@ -1,48 +1,40 @@
-import 'dart:convert';
 import 'dart:io';
 
-import 'package:path_provider/path_provider.dart';
-
 import '../models/sms_record.dart';
-import '../utils/constants.dart';
+import 'sms_history_database.dart';
 
+/// Local-first SMS history — SQLite with B-tree indexes ([SmsHistoryDatabase]).
 class StorageService {
   static final StorageService instance = StorageService._();
   StorageService._();
 
-  Future<File> _file() async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/${AppStrings.historyFile}');
-  }
+  final _db = SmsHistoryDatabase.instance;
 
-  Future<List<SmsRecord>> readAll() async {
-    try {
-      final f = await _file();
-      if (!f.existsSync()) return [];
-      final raw = f.readAsStringSync().trim();
-      if (raw.isEmpty) return [];
-      final list = jsonDecode(raw) as List<dynamic>;
-      return list
-          .map((e) => SmsRecord.fromJson(e as Map<String, dynamic>))
-          .toList();
-    } catch (_) {
-      return [];
-    }
-  }
+  Future<List<SmsRecord>> readAll({int limit = 2000}) =>
+      _db.readRecent(limit: limit);
 
-  Future<void> appendSms(SmsRecord record) async {
-    final records = await readAll();
-    records.insert(0, record); // newest first
-    final f = await _file();
-    f.writeAsStringSync(
-      jsonEncode(records.map((r) => r.toJson()).toList()),
-    );
-  }
+  Future<List<SmsRecord>> searchLocal(
+    String query, {
+    String? operatorKey,
+    int limit = 200,
+  }) =>
+      _db.searchLocal(query, operatorKey: operatorKey, limit: limit);
 
-  Future<File> getExportFile() => _file();
+  Future<void> appendSms(SmsRecord record, {bool synced = false}) =>
+      _db.append(record, synced: synced);
+
+  Future<void> appendSmsBatch(
+    List<SmsRecord> incoming, {
+    bool synced = false,
+  }) =>
+      _db.appendBatch(incoming, synced: synced);
+
+  Future<void> markSynced(String dedupeKey) => _db.markSynced(dedupeKey);
+
+  Future<File> getExportFile() => _db.writeExportJson();
 
   Future<Map<String, dynamic>> getStats() async {
-    final records = await readAll();
+    final records = await readAll(limit: 5000);
     final counts = <String, int>{};
     final balances = <String, double>{};
     for (final r in records) {
@@ -52,8 +44,5 @@ class StorageService {
     return {'counts': counts, 'balances': balances, 'total': records.length};
   }
 
-  Future<void> clearAll() async {
-    final f = await _file();
-    if (f.existsSync()) f.deleteSync();
-  }
+  Future<void> clearAll() => _db.clearAll();
 }

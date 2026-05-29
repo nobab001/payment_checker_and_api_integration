@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Payment Checker — Demo Shop</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --accent: #38bdf8;
+      --accent2: #818cf8;
+      --ok: #22c55e;
+      --err: #ef4444;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: radial-gradient(ellipse at top, #1e3a5f 0%, var(--bg) 55%);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    .wrap { max-width: 920px; margin: 0 auto; padding: 24px 16px 48px; }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+    .logo {
+      font-weight: 800;
+      font-size: 1.25rem;
+      letter-spacing: -0.02em;
+    }
+    .logo span { color: var(--accent); }
+    .badge {
+      font-size: 0.7rem;
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--accent);
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(56, 189, 248, 0.35);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    @media (max-width: 720px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: var(--card);
+      border-radius: 16px;
+      padding: 22px;
+      border: 1px solid rgba(148, 163, 184, 0.12);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+    }
+    .card h2 {
+      margin: 0 0 6px;
+      font-size: 1.1rem;
+    }
+    .card p.sub {
+      margin: 0 0 18px;
+      color: var(--muted);
+      font-size: 0.85rem;
+      line-height: 1.45;
+    }
+    .balance {
+      font-size: 2.4rem;
+      font-weight: 800;
+      color: var(--accent);
+      margin: 8px 0 4px;
+    }
+    .profile-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      display: grid;
+      place-items: center;
+      font-weight: 700;
+      font-size: 1.1rem;
+    }
+    label {
+      display: block;
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-bottom: 6px;
+      margin-top: 12px;
+    }
+    input {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      background: #0f172a;
+      color: var(--text);
+      font-size: 1rem;
+    }
+    input:focus {
+      outline: 2px solid var(--accent);
+      border-color: transparent;
+    }
+    .btn-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+    button, .btn-link {
+      cursor: pointer;
+      border: none;
+      border-radius: 10px;
+      padding: 12px 20px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      transition: transform 0.12s, opacity 0.12s;
+    }
+    button:active { transform: scale(0.98); }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), #0ea5e9);
+      color: #0f172a;
+    }
+    .btn-secondary {
+      background: rgba(129, 140, 248, 0.2);
+      color: #c7d2fe;
+      border: 1px solid rgba(129, 140, 248, 0.45);
+    }
+    .btn-link {
+      display: inline-block;
+      text-decoration: none;
+      background: linear-gradient(135deg, var(--accent2), #6366f1);
+      color: white;
+    }
+    #alert {
+      display: none;
+      margin-top: 20px;
+      padding: 14px 16px;
+      border-radius: 12px;
+      font-size: 0.95rem;
+      line-height: 1.5;
+      border: 1px solid transparent;
+    }
+    #alert.show { display: block; }
+    #alert.ok {
+      background: rgba(34, 197, 94, 0.12);
+      border-color: rgba(34, 197, 94, 0.45);
+      color: #bbf7d0;
+    }
+    #alert.err {
+      background: rgba(239, 68, 68, 0.12);
+      border-color: rgba(239, 68, 68, 0.45);
+      color: #fecaca;
+    }
+    details.config {
+      margin-top: 24px;
+      background: rgba(15, 23, 42, 0.6);
+      border-radius: 12px;
+      padding: 12px 16px;
+      border: 1px dashed rgba(148, 163, 184, 0.25);
+    }
+    details.config summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    .hint {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+    footer {
+      margin-top: 32px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="logo">Demo<span>Shop</span></div>
+      <span class="badge">Payment Checker B2B Demo</span>
+    </header>
+
+    <div id="alert" role="alert"></div>
+
+    <div class="grid">
+      <section class="card">
+        <h2>আমার প্রোফাইল</h2>
+        <p class="sub">মক ই-কমার্স ড্যাশবোর্ড — রিয়েল গেটওয়ে টেস্ট</p>
+        <div class="profile-row">
+          <div class="avatar">ড</div>
+          <div>
+            <strong>ডেমো কাস্টমার</strong><br />
+            <span style="color: var(--muted); font-size: 0.85rem">demo@paymentchecker.local</span>
+          </div>
+        </div>
+        <div style="color: var(--muted); font-size: 0.8rem">ওয়ালেট ব্যালেন্স</div>
+        <div class="balance" id="balance">৳ 1,250.00</div>
+        <p class="hint">সফল verify হলে ব্যালেন্স অটো বাড়বে (ডেমো)</p>
+      </section>
+
+      <section class="card">
+        <h2>টাকা অ্যাড করুন</h2>
+        <p class="sub">
+          bKash/Nagad SMS থেকে TrxID ও Amount দিন — সার্ভার
+          <code>/api/v1/merchant/verify-payment</code> চেক করবে।
+        </p>
+        <label for="trx">TrxID (SMS থেকে)</label>
+        <input id="trx" type="text" placeholder="যেমন: D8F2A1B3C4" autocomplete="off" />
+
+        <label for="amount">Amount (৳)</label>
+        <input id="amount" type="number" min="1" step="0.01" placeholder="500" />
+
+        <label for="receiver">Receiver number (ঐচ্ছিক)</label>
+        <input id="receiver" type="text" placeholder="01XXXXXXXXX" />
+
+        <div class="btn-row">
+          <button type="button" class="btn-primary" id="btnAdd">Add Balance</button>
+          <button type="button" class="btn-secondary" id="btnPay">Payment Now</button>
+        </div>
+        <p class="hint">
+          <strong>Payment Now</strong> — আপনার checkout গেটওয়ে নতুন ট্যাবে খুলবে।
+        </p>
+      </section>
+    </div>
+
+    <details class="config">
+      <summary>⚙️ API Keys &amp; Checkout (একবার সেট করুন)</summary>
+      <label for="apiBase">API Base URL</label>
+      <input id="apiBase" type="url" placeholder="http://localhost:3000" />
+      <label for="apiKey">X-Api-Key</label>
+      <input id="apiKey" type="text" placeholder="pk_live_..." />
+      <label for="apiSecret">X-Api-Secret</label>
+      <input id="apiSecret" type="password" placeholder="sk_live_..." />
+      <label for="checkoutSlug">Checkout slug (Payment Now)</label>
+      <input id="checkoutSlug" type="text" placeholder="daraz-test-xxxx" />
+      <div class="btn-row">
+        <button type="button" class="btn-secondary" id="btnSaveCfg">Save settings</button>
+      </div>
+      <p class="hint">
+        Payment Checker অ্যাপ → API Integration থেকে API Key, Secret ও Gateway URL-এর slug কপি করুন।
+      </p>
+    </details>
+
+    <footer>
+      <a href="/health" target="_blank" rel="noopener" style="color: var(--accent)">API health</a>
+      · <a href="/demo.html" style="color: var(--muted)">demo.html</a>
+    </footer>
+  </div>
+
+  <script>
+    const STORAGE_KEY = "pc_demo_merchant_v1";
+
+    /** Replace with your merchant keys from API Integration (or use Settings below). */
+    const DEMO_DEFAULTS = {
+      apiBase: window.location.origin,
+      apiKey: "",
+      apiSecret: "",
+      checkoutSlug: "",
+    };
+
+    function loadConfig() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        const saved = raw ? JSON.parse(raw) : {};
+        return { ...DEMO_DEFAULTS, ...saved };
+      } catch {
+        return { ...DEMO_DEFAULTS };
+      }
+    }
+
+    function saveConfig(cfg) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg));
+    }
+
+    function getConfigFromForm() {
+      return {
+        apiBase: document.getElementById("apiBase").value.trim().replace(/\/$/, ""),
+        apiKey: document.getElementById("apiKey").value.trim(),
+        apiSecret: document.getElementById("apiSecret").value.trim(),
+        checkoutSlug: document.getElementById("checkoutSlug").value.trim(),
+      };
+    }
+
+    function fillConfigForm(cfg) {
+      document.getElementById("apiBase").value = cfg.apiBase || DEMO_DEFAULTS.apiBase;
+      document.getElementById("apiKey").value = cfg.apiKey || "";
+      document.getElementById("apiSecret").value = cfg.apiSecret || "";
+      document.getElementById("checkoutSlug").value = cfg.checkoutSlug || "";
+    }
+
+    function showAlert(ok, message, extra) {
+      const el = document.getElementById("alert");
+      el.className = "show " + (ok ? "ok" : "err");
+      el.innerHTML =
+        "<strong>" +
+        (ok ? "✓ সফল" : "✗ ত্রুটি") +
+        "</strong><br>" +
+        escapeHtml(message) +
+        (extra ? "<br><small>" + escapeHtml(extra) + "</small>" : "");
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function parseBalance() {
+      const t = document.getElementById("balance").textContent.replace(/[^\d.]/g, "");
+      return parseFloat(t) || 0;
+    }
+
+    function setBalance(n) {
+      document.getElementById("balance").textContent =
+        "৳ " + n.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    async function verifyPayment() {
+      const cfg = getConfigFromForm();
+      saveConfig(cfg);
+
+      const trx = document.getElementById("trx").value.trim();
+      const amount = parseFloat(document.getElementById("amount").value);
+      const receiver = document.getElementById("receiver").value.trim();
+
+      if (!cfg.apiKey || !cfg.apiSecret) {
+        showAlert(
+          false,
+          "API Key ও Secret সেট করুন। নিচের ⚙️ Settings খুলে Payment Checker অ্যাপ থেকে কপি করুন।"
+        );
+        return;
+      }
+      if (!trx || !Number.isFinite(amount) || amount <= 0) {
+        showAlert(false, "TrxID এবং সঠিক Amount দিন।");
+        return;
+      }
+
+      const btn = document.getElementById("btnAdd");
+      btn.disabled = true;
+      showAlert(true, "যাচাই করা হচ্ছে…");
+
+      const body = {
+        trx_id: trx,
+        amount: amount,
+        merchant_order_id: "demo-" + Date.now(),
+      };
+      if (receiver) body.receiver_number = receiver;
+
+      try {
+        const res = await fetch(cfg.apiBase + "/api/v1/merchant/verify-payment", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Api-Key": cfg.apiKey,
+            "X-Api-Secret": cfg.apiSecret,
+          },
+          body: JSON.stringify(body),
+        });
+
+        const data = await res.json().catch(() => ({}));
+        const msg =
+          data.message ||
+          data.code ||
+          (res.ok ? "পেমেন্ট যাচাই হয়েছে" : "অনুরোধ ব্যর্থ");
+
+        if (res.ok && data.success) {
+          setBalance(parseBalance() + amount);
+          const extra = data.data
+            ? "Trx: " + (data.data.trx_id || trx) + " · Order: " + (data.data.merchant_order_id || "")
+            : "";
+          showAlert(true, msg, extra);
+        } else {
+          showAlert(false, msg, data.code ? "Code: " + data.code : "");
+        }
+      } catch (err) {
+        showAlert(
+          false,
+          "সার্ভারে যোগাযোগ হয়নি। API চালু আছে কি? (" + cfg.apiBase + ")",
+          err.message
+        );
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function openCheckout() {
+      const cfg = getConfigFromForm();
+      saveConfig(cfg);
+      if (!cfg.checkoutSlug) {
+        showAlert(
+          false,
+          "Checkout slug সেট করুন (API Integration → Gateway URL-এর শেষ অংশ)।"
+        );
+        return;
+      }
+      const url = cfg.apiBase + "/checkout/" + encodeURIComponent(cfg.checkoutSlug);
+      window.open(url, "_blank", "noopener,noreferrer");
+      showAlert(true, "গেটওয়ে নতুন ট্যাবে খোলা হয়েছে।", url);
+    }
+
+    document.getElementById("btnAdd").addEventListener("click", verifyPayment);
+    document.getElementById("btnPay").addEventListener("click", openCheckout);
+    document.getElementById("btnSaveCfg").addEventListener("click", () => {
+      saveConfig(getConfigFromForm());
+      showAlert(true, "সেটিংস সেভ হয়েছে।");
+    });
+
+    fillConfigForm(loadConfig());
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("api_key")) document.getElementById("apiKey").value = params.get("api_key");
+    if (params.has("api_secret")) document.getElementById("apiSecret").value = params.get("api_secret");
+    if (params.has("slug")) document.getElementById("checkoutSlug").value = params.get("slug");
+  </script>
+</body>
+</html>

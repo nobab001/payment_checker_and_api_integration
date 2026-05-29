@@ -8,7 +8,7 @@
 // Web: `flutter run -t lib/main.dart -d chrome` (no `--flavor`).
 //
 // Android applicationId: com.yourdomain.userapp  (root `user` flavor)
-// User auth: VPS API at AppConfig.apiBaseUrl ([utils/constants.dart]).
+// User auth: API at kBaseUrl ([config/api_config.dart]).
 // ─────────────────────────────────────────────────────────────────────────────
 import 'app.dart';
 void main() => bootUserApp();

@@ -1,90 +1,33 @@
-import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../models/device_model.dart' show SimSettings;
+import '../repositories/sim_filter_local_repository.dart';
+import 'sim_sms_filter.dart';
 
-/// Caches device filter settings locally so background SMS handler
-/// can check filters without network access.
+/// Bridge for SMS handlers — delegates to [SimFilterLocalRepository] + [SimSmsFilter].
 class DeviceSettingsCache {
-  static const _key = 'device_filter_settings';
-  static SharedPreferences? _prefs;
-
-  /// Returns filter settings for a given device_id.
-  /// Returns null if no settings cached.
-  static Future<DeviceFilterSettings?> getForDevice(String deviceId) async {
-    _prefs ??= await SharedPreferences.getInstance();
-    final raw = _prefs!.getString('${_key}_$deviceId');
-    if (raw == null) return null;
-    try {
-      return DeviceFilterSettings.fromJson(jsonDecode(raw));
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// Saves filter settings for a given device_id.
-  static Future<void> saveForDevice(String deviceId, DeviceFilterSettings settings) async {
-    _prefs ??= await SharedPreferences.getInstance();
-    await _prefs!.setString('${_key}_$deviceId', jsonEncode(settings.toJson()));
-  }
-
-  /// Checks if an SMS should be synced based on device filter settings.
-  /// Returns true if SMS passes filters (or no filter configured = backup all).
-  /// simSlot: 0 for SIM1, 1 for SIM2
+  /// Background / foreground SMS: strict SIM + sender rules from local storage.
   static Future<bool> shouldSyncSms({
     required String deviceId,
     required int simSlot,
     required String smsBody,
+    String? senderAddress,
   }) async {
-    final settings = await getForDevice(deviceId);
-    if (settings == null) return true; // No settings = backup all
-
-    final simConfig = simSlot == 0 ? settings.sim1 : settings.sim2;
-    
-    // If SIM is disabled, skip
-    if (!simConfig.isEnabled) return false;
-    
-    // If no filters, backup all SMS from this SIM
-    if (simConfig.filters.isEmpty) return true;
-    
-    // Check if any filter keyword is in SMS body
-    final lower = smsBody.toLowerCase();
-    return simConfig.filters.any((f) => lower.contains(f.toLowerCase()));
-  }
-}
-
-class DeviceFilterSettings {
-  final SimFilterConfig sim1;
-  final SimFilterConfig sim2;
-
-  const DeviceFilterSettings({required this.sim1, required this.sim2});
-
-  factory DeviceFilterSettings.fromJson(Map<String, dynamic> m) {
-    return DeviceFilterSettings(
-      sim1: SimFilterConfig.fromJson(m['sim1'] ?? {}),
-      sim2: SimFilterConfig.fromJson(m['sim2'] ?? {}),
+    // [deviceId] kept for API compatibility; filters are per-handset local keys.
+    return SimSmsFilter.shouldProcessIncomingSmsFromStorage(
+      subscriptionId: simSlot,
+      senderAddress: senderAddress,
     );
   }
 
-  Map<String, dynamic> toJson() => {
-    'sim1': sim1.toJson(),
-    'sim2': sim2.toJson(),
-  };
-}
-
-class SimFilterConfig {
-  final bool isEnabled;
-  final List<String> filters;
-
-  const SimFilterConfig({required this.isEnabled, required this.filters});
-
-  factory SimFilterConfig.fromJson(Map<String, dynamic> m) {
-    return SimFilterConfig(
-      isEnabled: m['status'] == 'on',
-      filters: (m['filters'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
+  /// When server sync runs, merge without replacing local lists with empty server arrays.
+  static Future<void> saveFromSimSettings(
+    String hardwareDeviceId,
+    SimSettings sims,
+  ) async {
+    await SimFilterLocalRepository.instance.mergeFromSimSettings(
+      sim1Active: sims.sim1.isEnabled,
+      sim1Filters: sims.sim1.filters,
+      sim2Active: sims.sim2.isEnabled,
+      sim2Filters: sims.sim2.filters,
     );
   }
-
-  Map<String, dynamic> toJson() => {
-    'status': isEnabled ? 'on' : 'off',
-    'filters': filters,
-  };
 }

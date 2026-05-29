@@ -10,6 +10,7 @@
  */
 
 require("dotenv").config();
+const path = require("path");
 const http = require("http");
 const express = require("express");
 const cors = require("cors");
@@ -19,6 +20,8 @@ const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
 
 const PORT = Number(process.env.PORT || 3000);
+/** Set when Socket.io starts — used by verify-otp for parent push notifications. */
+let deviceIo = null;
 const JWT_SECRET = process.env.JWT_SECRET || "change-me-in-production";
 const JWT_EXPIRES = process.env.JWT_EXPIRES || "30d";
 const OTP_EXPIRY_MIN = Number(process.env.OTP_EXPIRY_MIN || 10);
@@ -84,9 +87,72 @@ const pool = mysql.createPool({
 });
 
 const { registerDeviceRoutes } = require("./controllers/deviceController");
+const { registerPaymentPostgresRoutes } = require("./routes/paymentPostgresRoutes");
+const { registerMerchantRoutes } = require("./routes/merchantRoutes");
+const { registerCheckoutPublicRoutes } = require("./routes/checkoutPublicRoutes");
+const { insertPaymentPostgres } = require("./services/paymentSearchService");
+const { registerAuthDeviceRoutes } = require("./controllers/auth_controller");
+const { registerPinRoutes } = require("./controllers/pinController");
 const { registerDeviceSocket } = require("./socket/deviceSocket");
+const { registerOrUpdateDevice } = require("./services/deviceRegistration");
+const { initAuthCredentialTables } = require("./services/authSchemaInit");
+const {
+  isBdPhone,
+  isGmail,
+  normalizeContact,
+  isUserBlocked,
+  findUserByCredential,
+  ensureCredential,
+  evaluateDeviceBinding,
+  evaluateDeviceLoginEligibility,
+  bindDeviceToUser,
+  createUserWithPrimaryCredential,
+} = require("./services/credentialAuth");
+const { deviceNeedsSecurityPin } = require("./utils/deviceAuthPolicy");
+const {
+  hashPin,
+  verifyUserPin,
+  upgradePinHashIfNeeded,
+  isValidPinFormat,
+  isPinHashStorageValid,
+} = require("./utils/pinAuth");
 
-/** `devices` table + `custom_name`, `status`, `is_parent`. */
+async function addDevicesColumnIfMissing(sql, label) {
+  try {
+    await pool.query(sql);
+  } catch (e) {
+    if (e.code !== "ER_DUP_FIELDNAME") {
+      console.warn(`[initDevicesTable] ${label}:`, e.message || e);
+    }
+  }
+}
+
+async function initSettingsTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS settings (
+      setting_key VARCHAR(64) PRIMARY KEY,
+      setting_value TEXT NOT NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  
+  const defaults = {
+    global: JSON.stringify({ smsApiEnabled: true, gmailApiEnabled: true, userRegistrationEnabled: true, appEnabled: true }),
+    apiKeys: JSON.stringify({ smsApiKey: "", smsApiEndpoint: "", gmailApiKey: "", gmailApiEndpoint: "" }),
+    socialLinks: JSON.stringify({ whatsapp: "", facebook: "", telegram: "", youtube: "" }),
+    emailConfig: JSON.stringify({ gmailAddress: "", appPassword: "" }),
+    paymentSettings: JSON.stringify({ bkashApiKey: "", bkashSecretKey: "", bkashAppId: "", bkashPassword: "", testMode: true, bkashCallbackUrl: "" })
+  };
+
+  for (const [key, val] of Object.entries(defaults)) {
+    await pool.query(
+      `INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_key = setting_key`,
+      [key, val]
+    );
+  }
+}
+
+/** \`devices\` table + \`custom_name\`, \`status\`, \`is_parent\`. */
 async function initDevicesTable() {
   let needsParentBackfill = false;
   await pool.query(`
@@ -111,6 +177,8 @@ async function initDevicesTable() {
       blocked_keywords TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      last_seen_at TIMESTAMP NULL DEFAULT NULL,
+      last_battery_percent TINYINT UNSIGNED NULL DEFAULT NULL,
       UNIQUE KEY uniq_user_device (user_id, device_id),
       INDEX idx_devices_user (user_id),
       CONSTRAINT fk_devices_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -150,31 +218,115 @@ async function initDevicesTable() {
       SET d.is_parent = 1
     `);
   }
+  // Add presence/battery columns without AFTER — avoids ER_BAD_FIELD_ERROR if column order differs.
+  try {
+    await pool.query(
+      `ALTER TABLE devices ADD COLUMN last_seen_at TIMESTAMP NULL DEFAULT NULL`
+    );
+  } catch (e) {
+    if (e.code !== "ER_DUP_FIELDNAME") {
+      console.warn("[initDevicesTable] last_seen_at:", e.message || e);
+    }
+  }
+  try {
+    await pool.query(
+      `ALTER TABLE devices ADD COLUMN last_battery_percent TINYINT UNSIGNED NULL DEFAULT NULL`
+    );
+  } catch (e) {
+    if (e.code !== "ER_DUP_FIELDNAME") {
+      console.warn("[initDevicesTable] last_battery_percent:", e.message || e);
+    }
+  }
+  try {
+    await pool.query(
+      `ALTER TABLE devices ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`
+    );
+  } catch (e) {
+    if (e.code !== "ER_DUP_FIELDNAME") {
+      console.warn("[initDevicesTable] updated_at:", e.message || e);
+    }
+  }
+  // Legacy DBs created before device_model / SIM columns — required for registration + Flutter UI.
+  await addDevicesColumnIfMissing(
+    `ALTER TABLE devices ADD COLUMN device_model VARCHAR(255) NOT NULL DEFAULT ''`,
+    "device_model"
+  );
+  await addDevicesColumnIfMissing(
+    `ALTER TABLE devices ADD COLUMN android_version VARCHAR(64) NOT NULL DEFAULT ''`,
+    "android_version"
+  );
+  await addDevicesColumnIfMissing(
+    `ALTER TABLE devices ADD COLUMN sim1_number VARCHAR(32) DEFAULT NULL`,
+    "sim1_number"
+  );
+  await addDevicesColumnIfMissing(
+    `ALTER TABLE devices ADD COLUMN sim1_operator VARCHAR(64) DEFAULT NULL`,
+    "sim1_operator"
+  );
+  await addDevicesColumnIfMissing(
+    `ALTER TABLE devices ADD COLUMN sim2_number VARCHAR(32) DEFAULT NULL`,
+    "sim2_number"
+  );
+  await addDevicesColumnIfMissing(
+    `ALTER TABLE devices ADD COLUMN sim2_operator VARCHAR(64) DEFAULT NULL`,
+    "sim2_operator"
+  );
+  await addDevicesColumnIfMissing(
+    `ALTER TABLE devices ADD COLUMN sms_filter_enabled TINYINT(1) NOT NULL DEFAULT 1`,
+    "sms_filter_enabled"
+  );
+  await addDevicesColumnIfMissing(
+    `ALTER TABLE devices ADD COLUMN block_unknown TINYINT(1) NOT NULL DEFAULT 0`,
+    "block_unknown"
+  );
+  await addDevicesColumnIfMissing(
+    `ALTER TABLE devices ADD COLUMN block_incoming TINYINT(1) NOT NULL DEFAULT 0`,
+    "block_incoming"
+  );
+  await addDevicesColumnIfMissing(
+    `ALTER TABLE devices ADD COLUMN allowed_keywords TEXT`,
+    "allowed_keywords"
+  );
+  await addDevicesColumnIfMissing(
+    `ALTER TABLE devices ADD COLUMN blocked_keywords TEXT`,
+    "blocked_keywords"
+  );
+  await addDevicesColumnIfMissing(
+    `ALTER TABLE devices ADD COLUMN fcm_token VARCHAR(512) DEFAULT NULL`,
+    "fcm_token"
+  );
+  await addDevicesColumnIfMissing(
+    `ALTER TABLE devices ADD COLUMN sim_settings JSON DEFAULT NULL`,
+    "sim_settings"
+  );
 }
 
 const app = express();
-// Flutter Web (localhost:any) + mobile apps — reflect Origin so browser CORS accepts API calls
+
+// Trust the single proxy layer added by ngrok so that req.ip / rate-limiters
+// see the real client IP instead of the tunnel's forwarding address.
+app.set("trust proxy", 1);
+
+// Allow ngrok + mobile apps (CORS)
 app.use(
   cors({
     origin: true,
     credentials: true,
     methods: ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "Accept", "X-Device-Id"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "Accept",
+      "X-Device-Id",
+      "X-Api-Key",
+      "X-Api-Secret",
+      "Idempotency-Key",
+      "ngrok-skip-browser-warning",
+    ],
   })
 );
 app.use(express.json({ limit: "512kb" }));
-
-function isBdPhone(s) {
-  return /^(013|014|015|016|017|018|019)\d{8}$/.test(String(s || ""));
-}
-
-function isGmail(s) {
-  return /^[^\s@]+@gmail\.com$/i.test(String(s || ""));
-}
-
-function normalizeContact(raw) {
-  return String(raw || "").trim();
-}
+app.use(express.urlencoded({ extended: true, limit: "256kb" }));
 
 /**
  * BulkSMSBD and most BD gateways expect MSISDN: 8801XXXXXXXXX (not 01XXXXXXXXX).
@@ -198,7 +350,11 @@ function userRowToJson(row) {
     phone: row.phone != null ? String(row.phone) : "",
     role: row.role != null ? String(row.role) : "user",
     email: row.email != null ? String(row.email) : "",
-    pin: row.pin != null ? String(row.pin) : "",
+    pinConfigured: Boolean(row.pin && String(row.pin).length > 0),
+    profileComplete:
+      row.profile_complete === 1 ||
+      row.profile_complete === true ||
+      String(row.name || "").trim().length > 0,
     emailVerified: Boolean(row.email_verified),
     blocked: Boolean(row.blocked),
     balance: row.balance != null ? Number(row.balance) : 0,
@@ -211,12 +367,7 @@ function userRowToJson(row) {
 }
 
 async function findUserByContact(conn, contact) {
-  const c = normalizeContact(contact);
-  const [rows] = await conn.query(
-    "SELECT * FROM users WHERE phone = ? OR email = ? LIMIT 1",
-    [c, c]
-  );
-  return rows[0] || null;
+  return findUserByCredential(conn, contact);
 }
 
 function generateOtp() {
@@ -336,10 +487,83 @@ function authMiddleware(req, res, next) {
   }
 }
 
+const ADMIN_API_KEY = String(process.env.ADMIN_API_KEY || "dev-admin-key").trim();
+
+function adminKeyMiddleware(req, res, next) {
+  const key = String(req.headers["x-admin-key"] || "").trim();
+  if (!ADMIN_API_KEY || key !== ADMIN_API_KEY) {
+    return res.status(403).json({ success: false, message: "Admin key required" });
+  }
+  next();
+}
+
+function mapSmsTemplateRow(row) {
+  let formats = [];
+  try {
+    formats =
+      typeof row.formats === "string" ? JSON.parse(row.formats) : row.formats || [];
+  } catch {
+    formats = [];
+  }
+  if (!formats.length && row.body_template) formats = [row.body_template];
+  return {
+    id: row.id,
+    customer_preview: row.customer_preview || row.provider_tag || "",
+    sender_id: row.sender_id || row.sender_id_match || "",
+    formats,
+    is_active: row.is_active,
+    created_at: row.created_at,
+    updated_at: row.updated_at || row.created_at,
+  };
+}
+
+async function smsTemplatesRevision(activeOnly = true) {
+  const where = activeOnly ? "WHERE is_active = 1" : "";
+  const [rows] = await pool.query(
+    `SELECT COALESCE(MAX(updated_at), MAX(created_at)) AS rev FROM sms_templates ${where}`
+  );
+  const rev = rows[0]?.rev;
+  return rev ? new Date(rev).toISOString() : "";
+}
+
 // —— routes —— //
 
 app.get("/health", (req, res) => {
   res.json({ ok: true });
+});
+
+/** Flutter: device lock before OTP — { contact, deviceId } */
+app.post("/api/check-device-login", async (req, res) => {
+  const contact = normalizeContact(req.body?.contact || req.body?.phone);
+  const deviceId = String(req.body?.deviceId || req.body?.device_id || "").trim();
+  if (!contact) {
+    return res.status(400).json({ success: false, message: "contact required" });
+  }
+  if (!deviceId) {
+    return res.json({ success: true, allowed: true });
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    const result = await evaluateDeviceLoginEligibility(conn, contact, deviceId);
+    if (result.allowed) {
+      return res.json({ success: true, allowed: true });
+    }
+    return res.status(403).json({
+      success: false,
+      allowed: false,
+      code: result.code,
+      message: result.message,
+      boundAccountLabel: result.boundAccountLabel,
+      boundPhones: result.boundPhones,
+      boundEmails: result.boundEmails,
+    });
+  } catch (e) {
+    console.error("[check-device-login]", e);
+    return res.status(500).json({ success: false, message: "Server error" });
+  } finally {
+    conn.release();
+  }
 });
 
 /** Flutter: account probe */
@@ -374,9 +598,25 @@ async function handleSendOtp(req, res) {
     });
   }
 
+  const hwDeviceId = String(req.body?.deviceId || req.body?.device_id || "").trim();
+
   try {
     const conn = await pool.getConnection();
     try {
+      if (hwDeviceId) {
+        const deviceGate = await evaluateDeviceLoginEligibility(conn, phone, hwDeviceId);
+        if (!deviceGate.allowed) {
+          return res.status(403).json({
+            success: false,
+            code: deviceGate.code,
+            message: deviceGate.message,
+            boundAccountLabel: deviceGate.boundAccountLabel,
+            boundPhones: deviceGate.boundPhones,
+            boundEmails: deviceGate.boundEmails,
+          });
+        }
+      }
+
       const [last] = await conn.query(
         `SELECT created_at FROM otps WHERE contact = ? ORDER BY id DESC LIMIT 1`,
         [phone]
@@ -479,24 +719,53 @@ app.post("/api/verify-otp", async (req, res) => {
       return res.status(400).json({ success: false, message: "OTP expired" });
     }
 
-    let user = await findUserByContact(conn, phone);
+    const hwDeviceId = String(
+      req.body?.deviceId || req.body?.device_id || ""
+    ).trim();
+
+    let user = await findUserByCredential(conn, phone);
     let isNewUser = false;
+
+    if (user && isUserBlocked(user)) {
+      await conn.rollback();
+      return res.status(403).json({
+        success: false,
+        code: "ACCOUNT_BLOCKED",
+        message: "This account is blocked",
+      });
+    }
+
     if (!user) {
-      let insPhone = null;
-      let insEmail = null;
-      if (isBdPhone(phone)) insPhone = phone;
-      else if (isGmail(phone)) insEmail = phone;
-      else {
+      const deviceCheck = await evaluateDeviceBinding(conn, hwDeviceId, null);
+      if (!deviceCheck.allowed) {
+        await conn.rollback();
+        return res.status(403).json({
+          success: false,
+          code: deviceCheck.code,
+          message: deviceCheck.message,
+        });
+      }
+      if (!isBdPhone(phone) && !isGmail(phone)) {
         await conn.rollback();
         return res.status(400).json({ success: false, message: "Unsupported contact type" });
       }
-      const [r] = await conn.query(
-        `INSERT INTO users (phone, email, name, role) VALUES (?, ?, '', 'user')`,
-        [insPhone, insEmail]
-      );
-      const [inserted] = await conn.query("SELECT * FROM users WHERE id = ?", [r.insertId]);
-      user = inserted[0];
+      user = await createUserWithPrimaryCredential(conn, phone);
       isNewUser = true;
+    } else {
+      await ensureCredential(conn, user.id, phone, new Date());
+    }
+
+    if (hwDeviceId) {
+      const deviceCheck = await evaluateDeviceBinding(conn, hwDeviceId, user.id);
+      if (!deviceCheck.allowed) {
+        await conn.rollback();
+        return res.status(403).json({
+          success: false,
+          code: deviceCheck.code,
+          message: deviceCheck.message,
+        });
+      }
+      await bindDeviceToUser(conn, user.id, hwDeviceId);
     }
 
     await conn.query("UPDATE otps SET used_at = NOW() WHERE id = ?", [otpRow.id]);
@@ -506,11 +775,60 @@ app.post("/api/verify-otp", async (req, res) => {
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES });
     const userJson = userRowToJson(user);
 
+    let device = null;
+    let requiresApproval = false;
+    const hwDeviceName = String(
+      req.body?.deviceName || req.body?.device_name || "My Phone"
+    ).trim();
+    const hwDeviceModel = String(
+      req.body?.deviceModel || req.body?.device_model || ""
+    ).trim();
+    let requiresSecurityPin = false;
+    const securityPin = String(
+      req.body?.securityPin || req.body?.security_pin || req.body?.pin || ""
+    ).trim();
+
+    if (hwDeviceId) {
+      try {
+        const reg = await registerOrUpdateDevice(pool, deviceIo, {
+          userId: user.id,
+          deviceId: hwDeviceId,
+          deviceName: hwDeviceName || "My Phone",
+          deviceModel: hwDeviceModel,
+        });
+        device = reg.device;
+        requiresApproval = reg.requiresApproval;
+
+        if (deviceNeedsSecurityPin(device, requiresApproval)) {
+          if (!securityPin) {
+            requiresSecurityPin = true;
+          } else {
+            const [fresh] = await pool.query("SELECT * FROM users WHERE id = ? LIMIT 1", [
+              user.id,
+            ]);
+            if (!fresh.length || !verifyUserPin(fresh[0], securityPin)) {
+              return res.status(403).json({
+                success: false,
+                message: "Invalid security PIN",
+                requiresSecurityPin: true,
+              });
+            }
+            await upgradePinHashIfNeeded(pool, user.id, securityPin);
+          }
+        }
+      } catch (regErr) {
+        console.error("[verify-otp] device registration:", regErr);
+      }
+    }
+
     return res.json({
       success: true,
       token,
       user: userJson,
       isNewUser,
+      device,
+      requiresApproval,
+      requiresSecurityPin,
     });
   } catch (e) {
     try {
@@ -537,19 +855,86 @@ app.get("/api/me", authMiddleware, async (req, res) => {
   }
 });
 
+/** Verify account security PIN for non-parent device session (server-side). */
+app.post("/api/auth/verify-device-pin", authMiddleware, async (req, res) => {
+  const pin = String(req.body?.pin || req.body?.securityPin || "").trim();
+  if (!isValidPinFormat(pin)) {
+    return res.status(400).json({ success: false, message: "PIN must be 4 to 6 digits" });
+  }
+  try {
+    const [rows] = await pool.query("SELECT * FROM users WHERE id = ? LIMIT 1", [req.userId]);
+    if (!rows.length) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+    const stored = rows[0].pin != null ? String(rows[0].pin) : "";
+    if (stored.startsWith("pbkdf2:") && !isPinHashStorageValid(stored)) {
+      return res.status(500).json({
+        success: false,
+        code: "PIN_STORAGE_CORRUPT",
+        message:
+          "Account PIN data is corrupted in the database. Use Forgot PIN (OTP) after server DB migration.",
+      });
+    }
+    if (!verifyUserPin(rows[0], pin)) {
+      return res.status(403).json({ success: false, message: "Invalid security PIN" });
+    }
+    await upgradePinHashIfNeeded(pool, req.userId, pin);
+    return res.json({ success: true, devicePinVerified: true });
+  } catch (e) {
+    console.error("[verify-device-pin]", e);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
 app.post("/api/complete-profile", authMiddleware, async (req, res) => {
   const name = String(req.body?.name || "").trim();
-  const pin = String(req.body?.pin || "");
+  const pin = String(req.body?.pin || "").trim();
   const phone = normalizeContact(req.body?.phone);
   const email = String(req.body?.email || "").trim();
   if (!name) {
     return res.status(400).json({ success: false, message: "name required" });
   }
+  if (!isValidPinFormat(pin)) {
+    return res.status(400).json({ success: false, message: "PIN must be 4 to 6 digits" });
+  }
   try {
-    await pool.query(
-      `UPDATE users SET name = ?, pin = ?, phone = ?, email = ?, updated_at = NOW() WHERE id = ?`,
-      [name, pin, phone || null, email || null, req.userId]
-    );
+    const pinStored = hashPin(pin);
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+
+      const [credRows] = await conn.query(
+        `SELECT type FROM user_credentials WHERE user_id = ?`,
+        [req.userId]
+      );
+      const hasPhoneCred = credRows.some((r) => r.type === "phone");
+      if (!hasPhoneCred && (!phone || !isBdPhone(phone))) {
+        await conn.rollback();
+        return res.status(400).json({
+          success: false,
+          message: "Mobile number is required when signing up with Gmail",
+        });
+      }
+
+      await conn.query(
+        `UPDATE users SET name = ?, pin = ?, phone = ?, email = ?, profile_complete = 1, updated_at = NOW() WHERE id = ?`,
+        [name, pinStored, phone || null, email || null, req.userId]
+      );
+      if (phone) await ensureCredential(conn, req.userId, phone, new Date());
+      if (email && isGmail(email)) await ensureCredential(conn, req.userId, email, new Date());
+      await conn.commit();
+    } catch (credErr) {
+      try {
+        await conn.rollback();
+      } catch (_) {}
+      const status = credErr.statusCode || 500;
+      return res.status(status).json({
+        success: false,
+        message: credErr.message || "Server error",
+      });
+    } finally {
+      conn.release();
+    }
     const [rows] = await pool.query("SELECT * FROM users WHERE id = ?", [req.userId]);
     return res.json({ success: true, user: userRowToJson(rows[0]) });
   } catch (e) {
@@ -558,20 +943,244 @@ app.post("/api/complete-profile", authMiddleware, async (req, res) => {
   }
 });
 
-/** Minimal stub so Flutter `fetchRemoteConfig` does not break */
-app.get("/api/config", (req, res) => {
-  res.json({
-    appEnabled: true,
-    smsApiEnabled: true,
-    gmailApiEnabled: true,
-    userRegistrationEnabled: true,
-    smsGatewayActive: true,
-    smsGatewayChecked: true,
-    whatsapp: "",
-    facebook: "",
-    telegram: "",
-    youtube: "",
+/** Fetch remote config dynamically from settings table */
+app.get("/api/config", async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      "SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('global', 'socialLinks')"
+    );
+    let global = {};
+    let socialLinks = {};
+    for (const r of rows) {
+      if (r.setting_key === "global") {
+        global = JSON.parse(r.setting_value);
+      } else if (r.setting_key === "socialLinks") {
+        socialLinks = JSON.parse(r.setting_value);
+      }
+    }
+    return res.json({
+      appEnabled: global.appEnabled ?? true,
+      smsApiEnabled: global.smsApiEnabled ?? true,
+      gmailApiEnabled: global.gmailApiEnabled ?? true,
+      userRegistrationEnabled: global.userRegistrationEnabled ?? true,
+      smsGatewayActive: true,
+      smsGatewayChecked: true,
+      childApproveWithPin: true,
+      whatsapp: socialLinks.whatsapp ?? "",
+      facebook: socialLinks.facebook ?? "",
+      telegram: socialLinks.telegram ?? "",
+      youtube: socialLinks.youtube ?? "",
+    });
+  } catch (e) {
+    console.error("[api-config]", e);
+    return res.json({
+      appEnabled: true,
+      smsApiEnabled: true,
+      gmailApiEnabled: true,
+      userRegistrationEnabled: true,
+      smsGatewayActive: true,
+      smsGatewayChecked: true,
+      childApproveWithPin: true,
+      whatsapp: "",
+      facebook: "",
+      telegram: "",
+      youtube: "",
+    });
+  }
+});
+
+// Admin Authentication (using ADMIN_EMAIL and ADMIN_PASSWORD from env)
+app.post("/api/admin/login", async (req, res) => {
+  const email = String(req.body?.email || "").trim();
+  const password = String(req.body?.password || "").trim();
+  const expectedEmail = String(process.env.ADMIN_EMAIL || "admin@example.com").trim();
+  const expectedPassword = String(process.env.ADMIN_PASSWORD || "admin-password").trim();
+  
+  if (email === expectedEmail && password === expectedPassword) {
+    return res.json({
+      success: true,
+      token: ADMIN_API_KEY,
+      email: expectedEmail
+    });
+  }
+  return res.status(401).json({
+    success: false,
+    message: "Invalid admin email or password"
   });
+});
+
+// Admin Config management endpoints (requires x-admin-key)
+app.get("/api/admin/config", adminKeyMiddleware, async (req, res) => {
+  try {
+    const [rows] = await pool.query("SELECT setting_key, setting_value FROM settings");
+    const config = {};
+    for (const r of rows) {
+      config[r.setting_key] = JSON.parse(r.setting_value);
+    }
+    return res.json({ success: true, config });
+  } catch (e) {
+    console.error("[admin/config] get:", e);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+app.put("/api/admin/config/:key", adminKeyMiddleware, async (req, res) => {
+  const key = req.params.key;
+  const value = req.body;
+  try {
+    await pool.query(
+      "INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = ?",
+      [key, JSON.stringify(value), JSON.stringify(value)]
+    );
+    return res.json({ success: true });
+  } catch (e) {
+    console.error(`[admin/config] put ${key}:`, e);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// Admin SMS Settings management endpoints (requires x-admin-key)
+app.get("/api/admin/sms-settings", adminKeyMiddleware, async (req, res) => {
+  try {
+    const [rows] = await pool.query("SELECT * FROM sms_settings ORDER BY id ASC");
+    const settings = rows.map((r) => ({
+      id: String(r.id),
+      name: r.label || "",
+      apiKey: r.api_key || "",
+      endpoint: r.gateway_url || "",
+      senderId: r.sender_id || "",
+      isActive: Boolean(r.is_active)
+    }));
+    return res.json({ success: true, settings });
+  } catch (e) {
+    console.error("[admin/sms-settings] list:", e);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+app.post("/api/admin/sms-settings", adminKeyMiddleware, async (req, res) => {
+  const name = String(req.body?.name || "").trim();
+  const endpoint = String(req.body?.endpoint || "").trim();
+  const httpMethod = String(req.body?.httpMethod || "GET").trim();
+  const postBodyTemplate = String(req.body?.postBodyTemplate || "").trim();
+  const apiKey = String(req.body?.apiKey || "").trim();
+  const senderId = String(req.body?.senderId || "").trim();
+  const isActive = req.body?.isActive === true || req.body?.isActive === 1 ? 1 : 0;
+
+  try {
+    const [result] = await pool.query(
+      `INSERT INTO sms_settings (label, gateway_url, http_method, post_body_template, api_key, sender_id, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [name, endpoint, httpMethod, postBodyTemplate || null, apiKey, senderId, isActive]
+    );
+    return res.json({ success: true, id: String(result.insertId) });
+  } catch (e) {
+    console.error("[admin/sms-settings] create:", e);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+app.put("/api/admin/sms-settings/:id", adminKeyMiddleware, async (req, res) => {
+  const id = req.params.id;
+  const name = String(req.body?.name || "").trim();
+  const endpoint = String(req.body?.endpoint || "").trim();
+  const httpMethod = String(req.body?.httpMethod || "GET").trim();
+  const postBodyTemplate = String(req.body?.postBodyTemplate || "").trim();
+  const apiKey = String(req.body?.apiKey || "").trim();
+  const senderId = String(req.body?.senderId || "").trim();
+  const isActive = req.body?.isActive === true || req.body?.isActive === 1 ? 1 : 0;
+
+  try {
+    await pool.query(
+      `UPDATE sms_settings 
+       SET label = ?, gateway_url = ?, http_method = ?, post_body_template = ?, api_key = ?, sender_id = ?, is_active = ?
+       WHERE id = ?`,
+      [name, endpoint, httpMethod, postBodyTemplate || null, apiKey, senderId, isActive, id]
+    );
+    return res.json({ success: true });
+  } catch (e) {
+    console.error("[admin/sms-settings] update:", e);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+app.delete("/api/admin/sms-settings/:id", adminKeyMiddleware, async (req, res) => {
+  const id = req.params.id;
+  try {
+    await pool.query("DELETE FROM sms_settings WHERE id = ?", [id]);
+    return res.json({ success: true });
+  } catch (e) {
+    console.error("[admin/sms-settings] delete:", e);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+app.post("/api/admin/sms-settings/:id/activate", adminKeyMiddleware, async (req, res) => {
+  const id = req.params.id;
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.query("UPDATE sms_settings SET is_active = 0");
+    await conn.query("UPDATE sms_settings SET is_active = 1 WHERE id = ?", [id]);
+    await conn.commit();
+    return res.json({ success: true });
+  } catch (e) {
+    await conn.rollback();
+    console.error("[admin/sms-settings] activate:", e);
+    return res.status(500).json({ success: false, message: "Server error" });
+  } finally {
+    conn.release();
+  }
+});
+
+app.post("/api/admin/sms-settings/:id/deactivate", adminKeyMiddleware, async (req, res) => {
+  const id = req.params.id;
+  try {
+    await pool.query("UPDATE sms_settings SET is_active = 0 WHERE id = ?", [id]);
+    return res.json({ success: true });
+  } catch (e) {
+    console.error("[admin/sms-settings] deactivate:", e);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// Admin User Management endpoints (requires x-admin-key)
+app.get("/api/admin/users", adminKeyMiddleware, async (req, res) => {
+  try {
+    const [rows] = await pool.query("SELECT * FROM users ORDER BY name ASC");
+    const users = rows.map((r) => ({
+      uid: String(r.id),
+      name: r.name || "",
+      email: r.email || "",
+      phone: r.phone || "",
+      role: r.role || "user",
+      blocked: Boolean(r.blocked),
+      smsEnabled: true,
+      gmailEnabled: true,
+      createdAt: r.created_at ? new Date(r.created_at).toISOString() : null
+    }));
+    return res.json({ success: true, users });
+  } catch (e) {
+    console.error("[admin/users] list:", e);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+app.put("/api/admin/users/:id", adminKeyMiddleware, async (req, res) => {
+  const id = req.params.id;
+  const blocked = req.body?.blocked === true || req.body?.blocked === 1 ? 1 : 0;
+  const role = req.body?.role || "user";
+  try {
+    await pool.query("UPDATE users SET blocked = ?, role = ? WHERE id = ?", [blocked, role, id]);
+    return res.json({ success: true });
+  } catch (e) {
+    console.error("[admin/users] update:", e);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+app.put("/api/admin/users/:id/permissions", adminKeyMiddleware, async (req, res) => {
+  return res.json({ success: true });
 });
 
 /**
@@ -589,6 +1198,346 @@ app.post("/api/local-sms-ingest", (req, res) => {
   return res.json({ success: true });
 });
 
+/**
+ * POST /api/sms-ingest
+ * Authenticated. Accepts a single SmsRecord (toJson keys: t,s,m,b,tp,am).
+ * Stores in sms_records table; idempotent via INSERT IGNORE on unique key.
+ */
+/** User app: active admin templates (customer_preview + sender_id + formats). */
+async function listActiveSmsTemplates(_req, res) {
+  try {
+    const [rows] = await pool.query(
+      `SELECT id, customer_preview, sender_id, formats, is_active, created_at, updated_at
+         FROM sms_templates
+        WHERE is_active = 1
+        ORDER BY customer_preview ASC, id ASC`
+    );
+    const revision = await smsTemplatesRevision(true);
+    return res.json({
+      success: true,
+      revision,
+      templates: rows.map(mapSmsTemplateRow),
+    });
+  } catch (err) {
+    console.error("[sms-templates] DB error:", err.message);
+    return res.status(500).json({ success: false, message: "DB error" });
+  }
+}
+
+app.get("/api/sms-templates", authMiddleware, listActiveSmsTemplates);
+app.get("/api/sender-templates", authMiddleware, listActiveSmsTemplates);
+
+/** Admin CRUD for sms_templates */
+app.get("/api/admin/sms-templates", adminKeyMiddleware, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT id, customer_preview, sender_id, formats, is_active, created_at, updated_at
+         FROM sms_templates
+        ORDER BY created_at DESC, id DESC`
+    );
+    const revision = await smsTemplatesRevision(false);
+    return res.json({
+      success: true,
+      revision,
+      templates: rows.map(mapSmsTemplateRow),
+    });
+  } catch (err) {
+    console.error("[admin/sms-templates] list:", err.message);
+    return res.status(500).json({ success: false, message: "DB error" });
+  }
+});
+
+app.post("/api/admin/sms-templates", adminKeyMiddleware, async (req, res) => {
+  const { customer_preview, sender_id, formats } = req.body ?? {};
+  const preview = String(customer_preview || "").trim();
+  const sender = String(sender_id || "").trim();
+  const fmtList = Array.isArray(formats)
+    ? formats.map((f) => String(f).trim()).filter(Boolean)
+    : [];
+  if (!preview || !sender || fmtList.length === 0) {
+    return res.status(400).json({
+      success: false,
+      message: "customer_preview, sender_id, and formats[] are required",
+    });
+  }
+  try {
+    const [result] = await pool.query(
+      `INSERT INTO sms_templates (customer_preview, sender_id, formats, is_active)
+       VALUES (?, ?, ?, 1)`,
+      [preview, sender, JSON.stringify(fmtList)]
+    );
+    return res.json({ success: true, id: result.insertId });
+  } catch (err) {
+    console.error("[admin/sms-templates] create:", err.message);
+    return res.status(500).json({ success: false, message: "DB error" });
+  }
+});
+
+app.put("/api/admin/sms-templates/:id", adminKeyMiddleware, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ success: false, message: "invalid id" });
+  const { customer_preview, sender_id, formats, is_active } = req.body ?? {};
+  const preview = String(customer_preview || "").trim();
+  const sender = String(sender_id || "").trim();
+  const fmtList = Array.isArray(formats)
+    ? formats.map((f) => String(f).trim()).filter(Boolean)
+    : [];
+  if (!preview || !sender || fmtList.length === 0) {
+    return res.status(400).json({ success: false, message: "missing fields" });
+  }
+  try {
+    await pool.query(
+      `UPDATE sms_templates
+          SET customer_preview = ?, sender_id = ?, formats = ?, is_active = ?
+        WHERE id = ?`,
+      [
+        preview,
+        sender,
+        JSON.stringify(fmtList),
+        is_active === 0 || is_active === false ? 0 : 1,
+        id,
+      ]
+    );
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("[admin/sms-templates] update:", err.message);
+    return res.status(500).json({ success: false, message: "DB error" });
+  }
+});
+
+app.delete("/api/admin/sms-templates/:id", adminKeyMiddleware, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ success: false, message: "invalid id" });
+  try {
+    await pool.query(`DELETE FROM sms_templates WHERE id = ?`, [id]);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("[admin/sms-templates] delete:", err.message);
+    return res.status(500).json({ success: false, message: "DB error" });
+  }
+});
+
+/**
+ * POST /api/payment-sms-ingest
+ * Authenticated. Structured payment SMS → parsed_payments (+ sms_records).
+ */
+app.post("/api/payment-sms-ingest", authMiddleware, async (req, res) => {
+  const userId = req.userId;
+  if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+  const b = req.body ?? {};
+  const trx_id = String(b.trx_id ?? "").trim();
+  const receiver_number = String(
+    b.receiver_number ?? b.sim_number ?? ""
+  ).trim();
+  const provider_tag = String(b.provider_tag ?? "").trim();
+  const amount = b.amount;
+  const sms_date = String(b.sms_date ?? "").trim();
+  const sms_time = String(b.sms_time ?? "").trim();
+  const full_sms = String(b.full_sms ?? b.raw_body ?? "").trim();
+  const sim_slot = b.sim_slot;
+  const sender_number = String(b.sender_number ?? "").trim();
+  const sms_timestamp = b.sms_timestamp;
+  const balance = b.balance;
+
+  const fullSms = full_sms || "";
+  const trxId = trx_id || (fullSms ? `GEN${Date.now()}` : "");
+  const amt = parseFloat(amount);
+  const amountNum = Number.isFinite(amt) ? amt : 0;
+
+  if (!fullSms && (!trxId || amountNum <= 0)) {
+    return res.status(400).json({
+      success: false,
+      message: "full_sms required, or trx_id with amount",
+    });
+  }
+
+  let receivedAt = null;
+  if (sms_date && sms_time) {
+    receivedAt = parseSmsTimestamp(`${sms_date} ${sms_time}`);
+  }
+  if (!receivedAt) {
+    receivedAt = parseSmsTimestamp(sms_timestamp);
+  }
+  if (!receivedAt) {
+    receivedAt = new Date();
+  }
+
+  const deviceId = req.headers["x-device-id"] ?? null;
+  const sender = provider_tag.slice(0, 128);
+  const bal = String(balance ?? "").slice(0, 32);
+  const simNumber = receiver_number.slice(0, 32) || null;
+  const smsDateOnly = sms_date ? sms_date.slice(0, 10) : null;
+  const smsTimeOnly = sms_time ? sms_time.slice(0, 16) : null;
+
+  try {
+    await pool.query(
+      `INSERT INTO parsed_payments
+         (user_id, device_id, sim_slot, sim_number, receiver_number, provider_tag,
+          amount, trx_id, sender_number, sms_timestamp, sms_date, sms_time,
+          raw_body, full_sms)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        userId,
+        deviceId,
+        Number(sim_slot) || null,
+        simNumber,
+        simNumber,
+        sender,
+        amountNum,
+        trxId.slice(0, 64),
+        sender_number.slice(0, 32) || null,
+        receivedAt,
+        smsDateOnly,
+        smsTimeOnly,
+        fullSms || `TrxID ${trxId}`,
+        fullSms || `TrxID ${trxId}`,
+      ]
+    );
+    await pool.query(
+      `INSERT IGNORE INTO sms_records
+         (user_id, device_id, sender, body, amount, balance, type, received_at,
+          sim_slot, sim_number, provider_tag, trx_id, sender_number)
+       VALUES (?, ?, ?, ?, ?, ?, 'recv', ?, ?, ?, ?, ?, ?)`,
+      [
+        userId,
+        deviceId,
+        sender,
+        fullSms || `TrxID ${trxId}`,
+        amountNum,
+        bal,
+        receivedAt,
+        Number(sim_slot) || null,
+        simNumber,
+        sender,
+        trxId.slice(0, 64),
+        sender_number.slice(0, 32) || null,
+      ]
+    );
+    if (process.env.USE_POSTGRES === "1") {
+      try {
+        await insertPaymentPostgres({
+          accountId: userId,
+          deviceId,
+          simSlot: Number(sim_slot) || null,
+          receiverNumber: simNumber,
+          providerTag: sender,
+          amount: amountNum,
+          trxId: trxId.slice(0, 64),
+          senderNumber: sender_number.slice(0, 32) || null,
+          smsTimestamp: receivedAt,
+          smsDate: smsDateOnly,
+          smsTime: smsTimeOnly,
+          fullSms: fullSms || `TrxID ${trxId}`,
+        });
+      } catch (pgErr) {
+        console.warn("[payment-sms-ingest] postgres:", pgErr.message);
+      }
+    }
+
+    console.log(
+      `[payment-sms-ingest] ok user=${userId} trx=${trxId} receiver=${simNumber} tag=${sender}`
+    );
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("[payment-sms-ingest] DB error:", err.message);
+    return res.status(500).json({ success: false, message: "DB error" });
+  }
+});
+
+function parseSmsTimestamp(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  const dmy = s.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/
+  );
+  if (dmy) {
+    const day = Number(dmy[1]);
+    const month = Number(dmy[2]) - 1;
+    const year = Number(dmy[3]);
+    const hour = Number(dmy[4]);
+    const min = Number(dmy[5]);
+    const sec = Number(dmy[6] || 0);
+    const d = new Date(year, month, day, hour, min, sec);
+    if (!isNaN(d.getTime())) return d;
+  }
+  const d = new Date(s.replace(" ", "T"));
+  if (!isNaN(d.getTime())) return d;
+  const d2 = new Date(s);
+  if (!isNaN(d2.getTime())) return d2;
+  return null;
+}
+
+app.post("/api/sms-ingest", authMiddleware, async (req, res) => {
+  const userId = req.userId;
+  if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+  const { t, s, m, b, tp, am } = req.body ?? {};
+  if (!t || !m) {
+    return res.status(400).json({ success: false, message: "t (timestamp) and m (body) are required" });
+  }
+
+  const sender   = String(s ?? "").slice(0, 64);
+  const body     = String(m ?? "");
+  const amount   = parseFloat(am) || 0;
+  const balance  = String(b ?? "").slice(0, 32);
+  const type     = String(tp ?? "txn").slice(0, 16);
+  const deviceId = req.headers["x-device-id"] ?? null;
+
+  let receivedAt;
+  try {
+    receivedAt = new Date(String(t));
+    if (isNaN(receivedAt.getTime())) throw new Error("invalid date");
+  } catch {
+    return res.status(400).json({ success: false, message: "invalid timestamp in t" });
+  }
+
+  try {
+    await pool.query(
+      `INSERT IGNORE INTO sms_records
+         (user_id, device_id, sender, body, amount, balance, type, received_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [userId, deviceId, sender, body, amount, balance, type, receivedAt]
+    );
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("[sms-ingest] DB error:", err.message);
+    return res.status(500).json({ success: false, message: "DB error" });
+  }
+});
+
+/**
+ * GET /api/sms?page=1&limit=50
+ * Authenticated. Returns paginated SMS records for the current user, newest first.
+ */
+app.get("/api/sms", authMiddleware, async (req, res) => {
+  const userId = req.userId;
+  if (!userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+  const page  = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
+  const offset = (page - 1) * limit;
+
+  try {
+    const [rows] = await pool.query(
+      `SELECT id, sender, body, amount, balance, type, received_at
+         FROM sms_records
+        WHERE user_id = ?
+        ORDER BY received_at DESC
+        LIMIT ? OFFSET ?`,
+      [userId, limit, offset]
+    );
+    const [[{ total }]] = await pool.query(
+      `SELECT COUNT(*) AS total FROM sms_records WHERE user_id = ?`,
+      [userId]
+    );
+    return res.json({ success: true, records: rows, total, page, limit });
+  } catch (err) {
+    console.error("[GET /api/sms] DB error:", err.message);
+    return res.status(500).json({ success: false, message: "DB error" });
+  }
+});
+
 app.post("/api/wallet/start-top-up", authMiddleware, (req, res) => {
   res.status(501).json({ success: false, message: "Not implemented on this server" });
 });
@@ -599,19 +1548,283 @@ app.post("/api/wallet/purchase-history-subscription", authMiddleware, (req, res)
   res.status(501).json({ success: false, message: "Not implemented on this server" });
 });
 
+async function initSmsRecordsTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS sms_records (
+      id          INT AUTO_INCREMENT PRIMARY KEY,
+      user_id     INT          NOT NULL,
+      device_id   VARCHAR(255) DEFAULT NULL,
+      sender      VARCHAR(64)  NOT NULL DEFAULT '',
+      body        TEXT         NOT NULL,
+      amount      DECIMAL(12,2) NOT NULL DEFAULT 0,
+      balance     VARCHAR(32)  NOT NULL DEFAULT '',
+      type        VARCHAR(16)  NOT NULL DEFAULT 'txn',
+      received_at DATETIME     NOT NULL,
+      sim_slot    TINYINT      DEFAULT NULL,
+      sim_number  VARCHAR(32)  DEFAULT NULL,
+      provider_tag VARCHAR(64) DEFAULT NULL,
+      trx_id      VARCHAR(64)  DEFAULT NULL,
+      sender_number VARCHAR(32) DEFAULT NULL,
+      created_at  TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_sms (user_id, sender, received_at),
+      INDEX idx_sms_user (user_id, received_at),
+      INDEX idx_sms_trx (user_id, trx_id),
+      CONSTRAINT fk_sms_user FOREIGN KEY (user_id)
+        REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  const alters = [
+    "ALTER TABLE sms_records ADD COLUMN sim_slot TINYINT DEFAULT NULL",
+    "ALTER TABLE sms_records ADD COLUMN sim_number VARCHAR(32) DEFAULT NULL",
+    "ALTER TABLE sms_records ADD COLUMN provider_tag VARCHAR(64) DEFAULT NULL",
+    "ALTER TABLE sms_records ADD COLUMN trx_id VARCHAR(64) DEFAULT NULL",
+    "ALTER TABLE sms_records ADD COLUMN sender_number VARCHAR(32) DEFAULT NULL",
+  ];
+  for (const sql of alters) {
+    try {
+      await pool.query(sql);
+    } catch (e) {
+      if (e.code !== "ER_DUP_FIELDNAME") {
+        console.warn("[initSmsRecordsTable]", e.message || e);
+      }
+    }
+  }
+}
+
+async function initSmsTemplatesTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS sms_templates (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      customer_preview VARCHAR(128) NOT NULL,
+      sender_id VARCHAR(64) NOT NULL DEFAULT '',
+      formats JSON NOT NULL,
+      is_active TINYINT(1) NOT NULL DEFAULT 1,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_sms_templates_preview (customer_preview, is_active)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  const [existing] = await pool.query("SELECT COUNT(*) AS c FROM sms_templates");
+  if (Number(existing[0]?.c || 0) > 0) return;
+
+  const seeds = [
+    {
+      preview: "bKash Personal",
+      sender: "bKash",
+      formats: [
+        "You have received Tk [random] from [random]. Fee Tk 0.00. Balance Tk [random]. TrxID [random] at [random]",
+        "Cash In Tk [random] from [random] successful. Balance Tk [random]. TrxID [random] at [random]",
+      ],
+    },
+    {
+      preview: "Nagad Personal",
+      sender: "NAGAD",
+      formats: [
+        "Money Received. Amount: Tk [random] Sender: [random] TxnID: [random] Time: [random]",
+      ],
+    },
+  ];
+  for (const s of seeds) {
+    await pool.query(
+      `INSERT INTO sms_templates (customer_preview, sender_id, formats, is_active)
+       VALUES (?, ?, ?, 1)`,
+      [s.preview, s.sender, JSON.stringify(s.formats)]
+    );
+  }
+}
+
+async function initMerchantsB2BTables() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS merchants (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      account_id INT NOT NULL,
+      site_name VARCHAR(128) NOT NULL,
+      domain_address VARCHAR(255) NOT NULL DEFAULT '',
+      slug VARCHAR(64) NOT NULL,
+      api_key_id VARCHAR(32) NOT NULL,
+      api_secret_hash VARCHAR(255) NOT NULL,
+      gateway_username VARCHAR(64) DEFAULT NULL,
+      checkout_layout JSON NOT NULL,
+      is_active TINYINT(1) NOT NULL DEFAULT 1,
+      rate_limit_rpm INT NOT NULL DEFAULT 120,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_merchants_account_slug (account_id, slug),
+      UNIQUE KEY uq_merchants_api_key (api_key_id),
+      INDEX idx_merchants_account (account_id),
+      INDEX idx_merchants_slug (slug)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS payment_redemptions (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      payment_id BIGINT NOT NULL,
+      account_id INT NOT NULL,
+      merchant_id INT NOT NULL,
+      merchant_order_id VARCHAR(128) NOT NULL DEFAULT '',
+      trx_id VARCHAR(64) NOT NULL,
+      amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+      idempotency_key VARCHAR(64) DEFAULT NULL,
+      redeemed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_redemption_merchant_trx (merchant_id, trx_id),
+      UNIQUE KEY uq_redemption_merchant_order (merchant_id, merchant_order_id),
+      INDEX idx_redemptions_account_trx (account_id, trx_id),
+      CONSTRAINT fk_redemption_merchant FOREIGN KEY (merchant_id)
+        REFERENCES merchants(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  const parsedAlters = [
+    "ALTER TABLE parsed_payments ADD COLUMN is_used TINYINT(1) NOT NULL DEFAULT 0",
+    "ALTER TABLE parsed_payments ADD COLUMN used_at TIMESTAMP NULL DEFAULT NULL",
+    "ALTER TABLE parsed_payments ADD COLUMN used_by_merchant_id INT NULL DEFAULT NULL",
+    "CREATE INDEX idx_parsed_verify_lookup ON parsed_payments (user_id, trx_id, amount, is_used)",
+  ];
+  for (const sql of parsedAlters) {
+    try {
+      await pool.query(sql);
+    } catch (e) {
+      if (
+        !String(e.message).includes("Duplicate column") &&
+        !String(e.message).includes("Duplicate key name")
+      ) {
+        console.warn("[merchants B2B] alter:", e.message);
+      }
+    }
+  }
+}
+
+async function initParsedPaymentsTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS parsed_payments (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      device_id VARCHAR(255) DEFAULT NULL,
+      sim_slot TINYINT DEFAULT NULL,
+      sim_number VARCHAR(32) DEFAULT NULL,
+      receiver_number VARCHAR(32) DEFAULT NULL,
+      provider_tag VARCHAR(128) NOT NULL DEFAULT '',
+      amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+      trx_id VARCHAR(64) NOT NULL DEFAULT '',
+      sender_number VARCHAR(32) DEFAULT NULL,
+      sms_timestamp DATETIME NOT NULL,
+      sms_date DATE DEFAULT NULL,
+      sms_time VARCHAR(16) DEFAULT NULL,
+      raw_body TEXT,
+      full_sms TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_parsed_user_time (user_id, sms_timestamp),
+      INDEX idx_parsed_trx (user_id, trx_id),
+      CONSTRAINT fk_parsed_user FOREIGN KEY (user_id)
+        REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  const alters = [
+    "ALTER TABLE parsed_payments ADD COLUMN receiver_number VARCHAR(32) DEFAULT NULL",
+    "ALTER TABLE parsed_payments ADD COLUMN sms_date DATE DEFAULT NULL",
+    "ALTER TABLE parsed_payments ADD COLUMN sms_time VARCHAR(16) DEFAULT NULL",
+    "ALTER TABLE parsed_payments ADD COLUMN full_sms TEXT",
+  ];
+  for (const sql of alters) {
+    try {
+      await pool.query(sql);
+    } catch (e) {
+      if (!String(e.message).includes("Duplicate column")) {
+        console.warn("[parsed_payments] alter:", e.message);
+      }
+    }
+  }
+}
+
 async function startServer() {
+  try {
+    await initSettingsTable();
+  } catch (e) {
+    console.error("initSettingsTable failed:", e);
+    process.exit(1);
+  }
   try {
     await initDevicesTable();
   } catch (e) {
     console.error("initDevicesTable failed:", e);
     process.exit(1);
   }
+  try {
+    await initAuthCredentialTables(pool);
+  } catch (e) {
+    console.error("initAuthCredentialTables failed:", e);
+    process.exit(1);
+  }
+  try {
+    await initSmsRecordsTable();
+  } catch (e) {
+    console.error("initSmsRecordsTable failed:", e);
+    process.exit(1);
+  }
+  try {
+    await initSmsTemplatesTable();
+  } catch (e) {
+    console.error("initSmsTemplatesTable failed:", e);
+    process.exit(1);
+  }
+  try {
+    await initParsedPaymentsTable();
+  } catch (e) {
+    console.error("initParsedPaymentsTable failed:", e);
+    process.exit(1);
+  }
+  try {
+    await initMerchantsB2BTables();
+  } catch (e) {
+    console.error("initMerchantsB2BTables failed:", e);
+    process.exit(1);
+  }
+  const { setMysqlPool } = require("./services/merchantService");
+  const { initVerifyPool } = require("./services/merchantVerifyService");
+  setMysqlPool(pool);
+  initVerifyPool(pool);
   const server = http.createServer(app);
   const io = new Server(server, {
     cors: { origin: true, credentials: true },
   });
+  deviceIo = io;
   registerDeviceSocket(io, pool, JWT_SECRET);
+  registerAuthDeviceRoutes(app, pool, authMiddleware);
+  registerPinRoutes(app, pool, {
+    authMiddleware,
+    generateOtp,
+    dispatchSmsFromSettings,
+    sendOtpToGmail,
+    OTP_EXPIRY_MIN,
+    RESEND_COOLDOWN_SEC,
+    hashPin,
+    verifyUserPin,
+    isValidPinFormat,
+    userRowToJson,
+  });
+  const { registerCredentialRoutes } = require("./controllers/credentialController");
+  registerCredentialRoutes(app, pool, {
+    authMiddleware,
+    generateOtp,
+    dispatchSmsFromSettings,
+    sendOtpToGmail,
+    OTP_EXPIRY_MIN,
+    RESEND_COOLDOWN_SEC,
+    userRowToJson,
+  });
   registerDeviceRoutes(app, pool, authMiddleware, io);
+  registerPaymentPostgresRoutes(app, authMiddleware);
+  registerMerchantRoutes(app, {
+    authMiddleware,
+    pool,
+    verifyUserPin,
+    isValidPinFormat,
+  });
+  registerCheckoutPublicRoutes(app);
+  app.use(express.static(path.join(__dirname, "public")));
+  app.get("/demo", (_req, res) => res.redirect(302, "/demo.html"));
   app.use((req, res) => {
     res.status(404).json({ success: false, message: "Not found" });
   });

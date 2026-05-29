@@ -47,7 +47,7 @@ class IncomingSmsReceiver : BroadcastReceiver() {
         val smsList = Telephony.Sms.Intents.getMessagesFromIntent(intent)
         val messagesGroupedByOriginatingAddress = smsList.groupBy { it.originatingAddress }
         messagesGroupedByOriginatingAddress.forEach { group ->
-            processIncomingSms(context, group.value)
+            processIncomingSms(context, intent, group.value)
         }
     }
 
@@ -61,8 +61,10 @@ class IncomingSmsReceiver : BroadcastReceiver() {
      * [IncomingSmsHandler.executeDartCallbackInBackgroundIsolate] with the SMS.
      *
      */
-    private fun processIncomingSms(context: Context, smsList: List<SmsMessage>) {
-        val messageMap = smsList.first().toMap()
+    private fun processIncomingSms(context: Context, intent: Intent?, smsList: List<SmsMessage>) {
+        val first = smsList.first()
+        val messageMap = first.toMap()
+        SmsSimSlotResolver.enrichMessageMap(context, intent, first, messageMap)
         smsList.forEachIndexed { index, smsMessage ->
             if (index > 0) {
                 messageMap[MESSAGE_BODY] = (messageMap[MESSAGE_BODY] as String)

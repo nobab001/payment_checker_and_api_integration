@@ -10,6 +10,8 @@ class RemoteConfig {
   final String telegram;
   final String youtube;
 
+  final bool childApproveWithPin;
+
   const RemoteConfig({
     this.appEnabled = true,
     this.smsApiEnabled = true,
@@ -17,6 +19,7 @@ class RemoteConfig {
     this.userRegistrationEnabled = true,
     this.smsGatewayActive = false,
     this.smsGatewayChecked = false,
+    this.childApproveWithPin = false,
     this.whatsapp = '',
     this.facebook = '',
     this.telegram = '',
@@ -33,6 +36,9 @@ class RemoteConfig {
       userRegistrationEnabled: b('userRegistrationEnabled') ?? true,
       smsGatewayActive: b('smsGatewayActive') ?? false,
       smsGatewayChecked: b('smsGatewayChecked') ?? true,
+      childApproveWithPin: b('childApproveWithPin') ??
+          b('supportsChildApproveWithPin') ??
+          false,
       whatsapp: s('whatsapp') ?? '',
       facebook: s('facebook') ?? '',
       telegram: s('telegram') ?? '',

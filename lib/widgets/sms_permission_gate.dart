@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
@@ -5,6 +6,8 @@ import 'package:provider/provider.dart';
 import '../providers/sms_provider.dart';
 import '../services/app_permissions_service.dart';
 import '../services/sms_service.dart';
+import '../services/sms_sync_foreground_service.dart';
+import '../utils/app_crash_logger.dart';
 import '../utils/constants.dart';
 import '../screens/splash_screen.dart';
 
@@ -70,9 +73,21 @@ class _SmsPermissionGateState extends State<SmsPermissionGate>
   void _startSmsIfNeeded() {
     if (_smsServicesStarted) return;
     _smsServicesStarted = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await Future<void>.delayed(const Duration(milliseconds: 400));
       if (!mounted) return;
-      context.read<SmsProvider>().init();
+      try {
+        if (defaultTargetPlatform == TargetPlatform.android) {
+          await SmsSyncForegroundService.requestAndroidRuntimeSetup();
+        }
+        if (!mounted) return;
+        final sms = context.read<SmsProvider>();
+        await sms.preloadPersistedState();
+        if (!mounted) return;
+        await sms.init();
+      } catch (e, st) {
+        AppCrashLogger.log('SmsPermissionGate.startSms', e, st);
+      }
     });
   }
 

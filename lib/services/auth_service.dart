@@ -11,6 +11,8 @@ class AuthService {
 
   static const _kToken = 'auth_token';
   static const _kUserJson = 'auth_user_json';
+  /// Child device: PIN verified for this user until sign-out / new OTP login.
+  static const _kDevicePinUserId = 'device_pin_verified_user_id';
 
   Future<void> persistSession(String token, UserModel user) async {
     final p = await SharedPreferences.getInstance();
@@ -45,7 +47,24 @@ class AuthService {
     final p = await SharedPreferences.getInstance();
     await p.remove(_kToken);
     await p.remove(_kUserJson);
+    await p.remove(_kDevicePinUserId);
     ApiService.instance.setAuthToken(null);
+  }
+
+  Future<void> persistDevicePinVerified(String userId) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kDevicePinUserId, userId);
+  }
+
+  Future<bool> isDevicePinVerifiedForUser(String userId) async {
+    if (userId.isEmpty) return false;
+    final p = await SharedPreferences.getInstance();
+    return p.getString(_kDevicePinUserId) == userId;
+  }
+
+  Future<void> clearDevicePinVerified() async {
+    final p = await SharedPreferences.getInstance();
+    await p.remove(_kDevicePinUserId);
   }
 
   /// Apply token + in-memory API client without persisting (optional helper).

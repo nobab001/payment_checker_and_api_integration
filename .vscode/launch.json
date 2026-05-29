@@ -7,7 +7,12 @@
       "type": "dart",
       "cwd": "${workspaceFolder}",
       "program": "lib/main.dart",
-      "toolArgs": ["-d", "android", "--flavor", "user"]
+      "toolArgs": [
+        "-d",
+        "android",
+        "--flavor",
+        "user"
+      ]
     },
     {
       "name": "Debug User App",
@@ -15,7 +20,12 @@
       "type": "dart",
       "cwd": "${workspaceFolder}",
       "program": "lib/main.dart",
-      "toolArgs": ["-d", "android", "--flavor", "user"]
+      "toolArgs": [
+        "-d",
+        "android",
+        "--flavor",
+        "user"
+      ]
     },
     {
       "name": "Debug Admin App",
@@ -23,7 +33,12 @@
       "type": "dart",
       "cwd": "${workspaceFolder}",
       "program": "lib/main_admin.dart",
-      "toolArgs": ["-d", "android", "--flavor", "admin"]
+      "toolArgs": [
+        "-d",
+        "android",
+        "--flavor",
+        "admin"
+      ]
     },
     {
       "name": "User App — Android (pick device)",
@@ -31,7 +46,10 @@
       "type": "dart",
       "cwd": "${workspaceFolder}",
       "program": "lib/main.dart",
-      "toolArgs": ["--flavor", "user"]
+      "toolArgs": [
+        "--flavor",
+        "user"
+      ]
     },
     {
       "name": "User App — Chrome",
@@ -39,7 +57,10 @@
       "type": "dart",
       "cwd": "${workspaceFolder}",
       "program": "lib/main.dart",
-      "toolArgs": ["-d", "chrome"]
+      "toolArgs": [
+        "-d",
+        "chrome"
+      ]
     },
     {
       "name": "Admin → Chrome",
@@ -47,7 +68,10 @@
       "type": "dart",
       "cwd": "${workspaceFolder}/admin",
       "program": "lib/main.dart",
-      "toolArgs": ["-d", "chrome"]
+      "toolArgs": [
+        "-d",
+        "chrome"
+      ]
     },
     {
       "name": "Admin App — Chrome (ব্রাউজার)",
@@ -55,7 +79,10 @@
       "type": "dart",
       "cwd": "${workspaceFolder}/admin",
       "program": "lib/main.dart",
-      "toolArgs": ["-d", "chrome"]
+      "toolArgs": [
+        "-d",
+        "chrome"
+      ]
     },
     {
       "name": "Admin App — Edge",
@@ -63,13 +90,19 @@
       "type": "dart",
       "cwd": "${workspaceFolder}/admin",
       "program": "lib/main.dart",
-      "toolArgs": ["-d", "edge"]
+      "toolArgs": [
+        "-d",
+        "edge"
+      ]
     }
   ],
   "compounds": [
     {
       "name": "User phone + Admin Chrome (একসাথে)",
-      "configurations": ["User → phone (Android, flavor user)", "Admin → Chrome"],
+      "configurations": [
+        "User → phone (Android, flavor user)",
+        "Admin → Chrome"
+      ],
       "stopAll": true,
       "presentation": {
         "group": "payment_checker",
@@ -78,7 +111,10 @@
     },
     {
       "name": "একসাথে: User (Android) + Admin (Chrome)",
-      "configurations": ["User → phone (Android, flavor user)", "Admin App — Chrome (ব্রাউজার)"],
+      "configurations": [
+        "User → phone (Android, flavor user)",
+        "Admin App — Chrome (ব্রাউজার)"
+      ],
       "stopAll": true,
       "presentation": {
         "group": "payment_checker",
@@ -87,7 +123,10 @@
     },
     {
       "name": "একসাথে: User + Admin (দুইটি Android অ্যাপ)",
-      "configurations": ["Debug User App", "Debug Admin App"],
+      "configurations": [
+        "Debug User App",
+        "Debug Admin App"
+      ],
       "stopAll": true,
       "presentation": {
         "group": "payment_checker",

@@ -1,30 +1,36 @@
-import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
+import 'dart:async';
+import 'api_service.dart';
+
+class AdminUser {
+  final String email;
+  const AdminUser({required this.email});
+}
 
 class AdminAuthService {
   AdminAuthService._();
   static final instance = AdminAuthService._();
 
-  final _auth = FirebaseAuth.instance;
+  final _api = ApiService.instance;
+  final _authController = StreamController<AdminUser?>.broadcast();
 
-  User? get currentUser => _auth.currentUser;
-  Stream<User?> get authStateChanges => _auth.authStateChanges();
+  AdminUser? get currentUser => _api.isAuthenticated ? const AdminUser(email: 'admin@example.com') : null;
+  Stream<AdminUser?> get authStateChanges => _authController.stream;
 
-  Future<String?> signIn(String email, String password) async {
-    try {
-      await _auth.signInWithEmailAndPassword(email: email, password: password);
-      return null;
-    } on FirebaseAuthException catch (e) {
-      return _message(e.code);
-    }
+  Future<void> init() async {
+    _authController.add(currentUser);
   }
 
-  Future<void> signOut() => _auth.signOut();
+  Future<String?> signIn(String email, String password) async {
+    final ok = await _api.login(email, password);
+    if (ok) {
+      _authController.add(currentUser);
+      return null;
+    }
+    return 'ইমেইল বা পাসওয়ার্ড ভুল';
+  }
 
-  String _message(String code) => switch (code) {
-        'user-not-found' => 'অ্যাকাউন্ট পাওয়া যায়নি',
-        'wrong-password' => 'পাসওয়ার্ড ভুল',
-        'invalid-credential' => 'ইমেইল বা পাসওয়ার্ড ভুল',
-        'too-many-requests' => 'বারবার ভুল চেষ্টা — একটু পরে চেষ্টা করুন',
-        _ => 'লগিন ব্যর্থ ($code)',
-      };
+  Future<void> signOut() async {
+    await _api.logout();
+    _authController.add(null);
+  }
 }

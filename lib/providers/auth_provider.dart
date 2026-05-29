@@ -14,6 +14,10 @@ class AuthProvider extends ChangeNotifier {
   // Set during new-user OTP verification; cleared after signup complete
   String? pendingContact;
   bool pendingIsPhone = false;
+  bool _devicePinVerifiedThisSession = false;
+  bool pendingDevicePinRequired = false;
+
+  bool get devicePinVerifiedThisSession => _devicePinVerifiedThisSession;
 
   UserModel? get user => _user;
   bool get loading => _loading;
@@ -51,11 +55,12 @@ class AuthProvider extends ChangeNotifier {
       }
 
       if (_user != null) {
-        try {
-          await ApiService.instance.syncDeviceSettingsToCache();
-        } catch (_) {
-          // Non-critical
+        final pinOk = await AuthService.instance.isDevicePinVerifiedForUser(_user!.id);
+        if (pinOk) {
+          _devicePinVerifiedThisSession = true;
+          pendingDevicePinRequired = false;
         }
+        // SIM filter cache sync runs after [DeviceApprovalProvider.ensureInitialized].
       }
     } finally {
       _restoring = false;
@@ -79,10 +84,27 @@ class AuthProvider extends ChangeNotifier {
     pendingIsPhone = false;
   }
 
+  Future<void> markDevicePinVerified() async {
+    _devicePinVerifiedThisSession = true;
+    pendingDevicePinRequired = false;
+    final uid = _user?.id;
+    if (uid != null && uid.isNotEmpty) {
+      await AuthService.instance.persistDevicePinVerified(uid);
+    }
+    notifyListeners();
+  }
+
+  void setPendingDevicePinRequired(bool value) {
+    pendingDevicePinRequired = value;
+    notifyListeners();
+  }
+
   /// After OTP verification: store JWT and user from API (or load via `/api/me` if [user] is null).
   Future<bool> signInWithSession(String token, UserModel? user) async {
     _loading = true;
     _error = null;
+    _devicePinVerifiedThisSession = false;
+    await AuthService.instance.clearDevicePinVerified();
     notifyListeners();
     try {
       ApiService.instance.setAuthToken(token);
@@ -128,6 +150,8 @@ class AuthProvider extends ChangeNotifier {
   Future<void> signOut() async {
     await AuthService.instance.clearSession();
     _user = null;
+    _devicePinVerifiedThisSession = false;
+    pendingDevicePinRequired = false;
     clearPendingContact();
     DeviceSessionBridge.notifySignedOut();
     notifyListeners();

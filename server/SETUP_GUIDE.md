@@ -14,6 +14,7 @@ Complete step-by-step instructions for deploying the Payment Checker OTP System.
 6. [SMS Gateway Configuration](#sms-gateway-configuration)
 7. [VPS Deployment](#vps-deployment)
 8. [Testing](#testing)
+9. [Flutter app: API base URL (device vs PC)](#flutter-app-api-base-url-device-vs-pc)
 
 ---
 
@@ -359,17 +360,33 @@ sudo ufw enable
 
 ---
 
+## Flutter app: API base URL (device vs PC)
+
+The default API origin is `http://127.0.0.1:3000` in [`lib/config/api_config.dart`](../lib/config/api_config.dart) (overridable in SharedPreferences). On each machine, **`127.0.0.1` means that machine itself**—not automatically your development PC.
+
+| Where the app runs | What to use |
+|---------------------|-------------|
+| **Android emulator** | `http://10.0.2.2:3000` reaches the host PC, or keep `127.0.0.1:3000` and use `adb reverse tcp:3000 tcp:3000`. |
+| **Physical phone (Wi‑Fi)** | Use your PC’s LAN IP, e.g. `http://192.168.1.5:3000`. The phone’s `127.0.0.1` is the phone, not the PC. |
+| **Web / Windows desktop** | `http://127.0.0.1:3000` is usually correct if Node runs on the same PC. |
+
+Run the Node server listening on `0.0.0.0` (see `server/app.js`) so other devices on the LAN can connect. On Windows, allow the Node process (or port 3000) through the firewall for private networks.
+
+**In the app:** set the base URL **before login** using **সার্ভার ঠিকানা পরিবর্তন** on the login screen, or after login via Profile → **SMS filter & forward**.
+
+---
+
 ## Testing
 
 ### Flutter app: login and API reachability
 
-The Flutter login screen calls `GET /health` on the configured API base URL before sending or verifying OTP. If the phone has no usable network interface, or the server is down, wrong host, or DNS fails, the app shows **Bengali** snackbar messages (mapped from `ApiException.code` in `ApiService` / `LoginScreen`).
+The Flutter login screen calls `GET /health` on the configured API base URL before sending or verifying OTP. If the phone has no usable network interface, or the server is down, wrong host, or DNS fails, the app shows snackbar messages (Bengali for most codes; English for `connection_failed` after transport retries).
 
 **Checklist**
 
-1. **Node API running** on the same host/port as in the app (default `http://127.0.0.1:3000` from [lib/utils/constants.dart](../lib/utils/constants.dart)).
-2. **USB debugging:** run `adb reverse tcp:3000 tcp:3000` so the device’s `127.0.0.1:3000` reaches the PC.
-3. **Custom base URL:** Profile → **SMS filter & forward** (override stored in SharedPreferences).
+1. **Node API running** on the same host/port as in the app (default from [`lib/config/api_config.dart`](../lib/config/api_config.dart)).
+2. **USB debugging:** run `adb reverse tcp:3000 tcp:3000` so the device’s `127.0.0.1:3000` reaches the PC (when using that URL).
+3. **Custom base URL:** login screen **সার্ভার ঠিকানা পরিবর্তন**, or Profile → **SMS filter & forward** (SharedPreferences override).
 4. **Firewall** not blocking inbound connections to the API port.
 
 ### Health Check

@@ -9,7 +9,7 @@ class SmsMonitoringPrefs {
 
   static Future<bool> isMonitoringEnabled() async {
     final p = await SharedPreferences.getInstance();
-    return p.getBool(_monitoringKey) ?? true;
+    return p.getBool(_monitoringKey) ?? false;
   }
 
   static Future<void> setMonitoringEnabled(bool enabled) async {

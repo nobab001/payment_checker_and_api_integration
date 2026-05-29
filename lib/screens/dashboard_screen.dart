@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -5,8 +7,10 @@ import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../providers/auth_provider.dart';
+import '../providers/device_approval_provider.dart';
 import '../providers/remote_config_provider.dart';
 import '../providers/sms_provider.dart';
+import 'device_settings_page.dart';
 import '../services/storage_service.dart';
 import '../utils/constants.dart';
 import '../widgets/history_list_widgets.dart';
@@ -25,9 +29,77 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) => context.read<SmsProvider>().load(),
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final sms = context.read<SmsProvider>();
+      if (!sms.statePreloaded) await sms.preloadPersistedState();
+      await sms.load();
+    });
+  }
+
+  Future<void> _openDeviceSettings(BuildContext context) async {
+    final device = context.read<DeviceApprovalProvider>().thisDevice;
+    if (device == null) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Device not ready yet. Open the Devices tab and try again.',
+          ),
+        ),
+      );
+      return;
+    }
+    final saved = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute<bool>(
+        builder: (_) => DeviceSettingsPage(
+          device: device,
+          onSaved: () {},
+        ),
+      ),
     );
+    if (!context.mounted) return;
+    await context.read<SmsProvider>().refreshSetupState();
+    if (saved == true && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Device settings saved. You can start monitoring now.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+  }
+
+  Future<void> _handleMonitoringToggle(BuildContext context) async {
+    final sms = context.read<SmsProvider>();
+    if (!sms.monitoringEnabled) {
+      await sms.refreshSetupState();
+      if (!sms.deviceConfigured) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Device Settings-এ SIM slot, মোবাইল নম্বর ও Admin Template সেভ করুন।',
+            ),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        await _openDeviceSettings(context);
+        return;
+      }
+    }
+    final ok = await sms.setMonitoringEnabled(!sms.monitoringEnabled);
+    if (!ok && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Please configure your SIM slot and select at least one sender first.',
+          ),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      await _openDeviceSettings(context);
+    }
   }
 
   @override
@@ -120,34 +192,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
                 if (!kIsWeb) ...[
                   const SizedBox(height: 10),
-                  Card(
-                    margin: EdgeInsets.zero,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: SwitchListTile(
-                      title: const Text(
-                        'SMS মনিটরিং সেবা',
-                        style: TextStyle(
-                            fontWeight: FontWeight.w600, fontSize: 14),
-                      ),
-                      subtitle: Text(
-                        'চালু থাকলে অ্যাপ বন্ধ থাকলেও নতুন এসএমএস সংগ্রহ ও সার্ভার সিঙ্ক হবে। '
-                        'রিবুটের পরও চালু রাখলে বুট-কমপ্লিট দিয়ে আবার সক্রিয় হবে। স্যুইচ চালু করলে ইনবক্স একবার ইমপোর্ট হয়। '
-                        'প্যাকগ্রাউন্ডে সাব-ডিভাইস সিঙ্ক ফ্লাশের জন্য WorkManager নিবন্ধিত আছে.',
-                        style: TextStyle(
-                          fontSize: 11,
-                          height: 1.35,
-                          color: Colors.grey.shade700,
-                        ),
-                      ),
-                      value: sms.monitoringEnabled,
-                      onChanged: sms.loading
-                          ? null
-                          : (v) => context
-                              .read<SmsProvider>()
-                              .setMonitoringEnabled(v),
-                    ),
+                  _MonitoringCard(
+                    enabled: sms.monitoringEnabled,
+                    configured: sms.deviceConfigured,
+                    restoring: sms.statePreloaded && sms.serviceActivated,
+                    loading: sms.loading,
+                    total: sms.total,
+                    onToggle: () => _handleMonitoringToggle(context),
+                    onConfigure: () => _openDeviceSettings(context),
                   ),
                 ],
                 _WalletTopBar(
@@ -162,9 +214,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   },
                   onMenuSelected: (value) {
                     switch (value) {
-                      case 'import':
-                        context.read<SmsProvider>().importFromInbox();
-                        break;
                       case 'export':
                         _export(context);
                         break;
@@ -229,9 +278,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               icon: const Icon(Icons.clear, size: 20),
                               onPressed: () {
                                 _searchCtrl.clear();
-                                context
-                                    .read<SmsProvider>()
-                                    .setHistorySearchQuery('');
+                                unawaited(
+                                  context
+                                      .read<SmsProvider>()
+                                      .setHistorySearchQuery(''),
+                                );
                               },
                             ),
                       filled: true,
@@ -257,7 +308,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                     ),
                     onChanged: (v) {
-                      context.read<SmsProvider>().setHistorySearchQuery(v);
+                      unawaited(
+                        context.read<SmsProvider>().setHistorySearchQuery(v),
+                      );
                     },
                   ),
                   const SizedBox(height: 8),
@@ -294,7 +347,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ),
           ),
-          if (sms.loading)
+          if (sms.loading || sms.searchingRemote)
             const SliverFillRemaining(
               hasScrollBody: false,
               child: Center(child: CircularProgressIndicator()),
@@ -303,8 +356,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             SliverToBoxAdapter(
               child: HistoryListEmptyState(
                 hasRecords: sms.records.isNotEmpty,
-                onImport: () =>
-                    context.read<SmsProvider>().importFromInbox(),
+                monitoringEnabled: sms.monitoringEnabled,
+                deviceConfigured: sms.deviceConfigured,
               ),
             )
           else
@@ -377,7 +430,6 @@ class _WalletTopBar extends StatelessWidget {
             PopupMenuButton<String>(
               icon: Icon(Icons.more_vert, color: Colors.grey.shade700, size: 22),
               itemBuilder: (ctx) => const [
-                PopupMenuItem(value: 'import', child: Text('Import inbox')),
                 PopupMenuItem(value: 'export', child: Text('Export JSON')),
                 PopupMenuItem(value: 'clear', child: Text('Clear all')),
               ],
@@ -509,6 +561,142 @@ class _ApiDisabledBanner extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _MonitoringCard extends StatelessWidget {
+  final bool enabled;
+  final bool configured;
+  final bool restoring;
+  final bool loading;
+  final int total;
+  final VoidCallback onToggle;
+  final VoidCallback onConfigure;
+
+  const _MonitoringCard({
+    required this.enabled,
+    required this.configured,
+    required this.restoring,
+    required this.loading,
+    required this.total,
+    required this.onToggle,
+    required this.onConfigure,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = enabled
+        ? Colors.green
+        : configured
+            ? Colors.orange
+            : Colors.grey;
+    final statusText = enabled
+        ? 'ACTIVE · Listening · $total records synced'
+        : restoring
+            ? 'ACTIVE · Restoring background service…'
+            : configured
+                ? 'Ready — tap Start Service'
+                : 'Setup required — configure SIM & Admin Template';
+    return Card(
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  enabled ? Icons.sensors : Icons.settings_suggest_outlined,
+                  color: color.shade600,
+                  size: 18,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    statusText,
+                    style: TextStyle(
+                      color: color.shade700,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (!configured) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Settings-এ SIM slot, মোবাইল নম্বর ও Admin Template/Center সেভ করুন। তারপর Start Service চালু হবে।',
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade700, height: 1.35),
+              ),
+            ],
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: loading
+                  ? const Center(
+                      child: SizedBox(
+                        height: 32,
+                        width: 32,
+                        child: CircularProgressIndicator(strokeWidth: 2.5),
+                      ),
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        FilledButton.icon(
+                          onPressed: loading
+                              ? null
+                              : (!configured && !enabled)
+                                  ? null
+                                  : (restoring && !enabled)
+                                      ? null
+                                      : onToggle,
+                          icon: Icon(
+                            enabled
+                                ? Icons.stop_circle_outlined
+                                : Icons.play_circle_outlined,
+                            size: 18,
+                          ),
+                          label: Text(
+                            enabled
+                                ? 'Stop Service'
+                                : restoring
+                                    ? 'Service Active'
+                                    : configured
+                                        ? 'Start Service'
+                                        : 'Start Service',
+                          ),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: enabled
+                                ? Colors.red.shade600
+                                : configured
+                                    ? Colors.green.shade600
+                                    : Colors.grey.shade500,
+                            disabledBackgroundColor: Colors.grey.shade400,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                        ),
+                        if (!configured) ...[
+                          const SizedBox(height: 8),
+                          OutlinedButton.icon(
+                            onPressed: onConfigure,
+                            icon: const Icon(Icons.tune, size: 18),
+                            label: const Text('Device Settings'),
+                          ),
+                        ],
+                      ],
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }

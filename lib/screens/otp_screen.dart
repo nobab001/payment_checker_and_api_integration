@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../services/otp_service.dart';
 import '../utils/constants.dart';
+import '../widgets/custom_otp_field.dart';
 
 class OtpScreen extends StatefulWidget {
   /// Phone (11-digit) or @gmail.com — same as `/api/send-otp` body field `phone`.
@@ -100,23 +100,6 @@ class _OtpScreenState extends State<OtpScreen> {
     );
   }
 
-  void _onDigitEntered(int index, String value) {
-    if (value.length == 6) {
-      for (int i = 0; i < 6; i++) {
-        _ctrl[i].text = value[i];
-      }
-      _focus[5].requestFocus();
-      _verify();
-      return;
-    }
-    if (value.isNotEmpty && index < 5) {
-      _focus[index + 1].requestFocus();
-    }
-    if (value.isEmpty && index > 0) {
-      _focus[index - 1].requestFocus();
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -163,13 +146,13 @@ class _OtpScreenState extends State<OtpScreen> {
                     child: CircularProgressIndicator(color: AppColors.primary),
                   )
                 else ...[
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: List.generate(6, (i) => _OtpBox(
-                      controller: _ctrl[i],
-                      focusNode: _focus[i],
-                      onChanged: (v) => _onDigitEntered(i, v),
-                    )),
+                  CustomOtpField(
+                    controllers: _ctrl,
+                    focusNodes: _focus,
+                    enabled: !_verifying,
+                    onAutoSubmit: (_) async {
+                      if (!_verifying && mounted) await _verify();
+                    },
                   ),
                   const SizedBox(height: 32),
                   ElevatedButton(
@@ -209,52 +192,6 @@ class _OtpScreenState extends State<OtpScreen> {
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _OtpBox extends StatelessWidget {
-  final TextEditingController controller;
-  final FocusNode focusNode;
-  final ValueChanged<String> onChanged;
-
-  const _OtpBox({
-    required this.controller,
-    required this.focusNode,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 44,
-      height: 54,
-      child: TextFormField(
-        controller: controller,
-        focusNode: focusNode,
-        textAlign: TextAlign.center,
-        keyboardType: TextInputType.number,
-        maxLength: 6,
-        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-        style: const TextStyle(
-            fontSize: 22, fontWeight: FontWeight.bold, color: AppColors.primary),
-        decoration: InputDecoration(
-          counterText: '',
-          contentPadding: EdgeInsets.zero,
-          filled: true,
-          fillColor: Colors.grey.shade100,
-          border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: Colors.grey.shade300)),
-          enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: Colors.grey.shade300)),
-          focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: AppColors.primary, width: 2)),
-        ),
-        onChanged: onChanged,
       ),
     );
   }

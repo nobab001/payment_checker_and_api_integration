@@ -6,7 +6,10 @@
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
-    "dev": "node --watch app.js"
+    "dev": "node --watch app.js",
+    "pg:migrate": "node scripts/run-pg-migration.js all",
+    "pg:migrate:002": "node scripts/run-pg-migration.js 002",
+    "test:b2b": "node scripts/e2e-b2b-smoke.js"
   },
   "dependencies": {
     "axios": "^1.7.9",
@@ -18,6 +21,7 @@
     "jsonwebtoken": "^9.0.2",
     "mysql2": "^3.11.0",
     "nodemailer": "^6.9.16",
+    "pg": "^8.21.0",
     "socket.io": "^4.8.3"
   }
 }

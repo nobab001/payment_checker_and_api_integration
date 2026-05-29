@@ -1,62 +1,43 @@
-import 'package:android_id/android_id.dart';
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:telephony/telephony.dart';
 
-import 'device_settings_cache.dart';
+import 'api_service.dart';
 import 'local_sms_forward_service.dart';
+import 'payment_sms_processor.dart';
+import 'sms_service_state_prefs.dart';
 import 'storage_service.dart';
 import '../models/sms_record.dart';
 import '../sync/sync_service.dart';
-import '../utils/sms_parser.dart';
-import 'sms_monitoring_prefs.dart';
 
 // Top-level function required by telephony for background isolate.
-// WidgetsFlutterBinding init is required so path_provider can use
-// platform channels from the background engine.
 @pragma('vm:entry-point')
 Future<void> onBackgroundSms(SmsMessage message) async {
   WidgetsFlutterBinding.ensureInitialized();
   await LocalSmsForwardService.instance.tryForwardIncomingSms(message);
-  if (!await SmsMonitoringPrefs.isMonitoringEnabled()) return;
+  if (!await SmsServiceStatePrefs.shouldResumeService()) return;
 
-  // Check device filter settings
-  final deviceId = await _getDeviceId();
-  final simSlot = message.subscriptionId ?? 0;
-  final body = message.body ?? '';
+  await PaymentSmsProcessor.bootstrapForBackground();
+  final processed = await PaymentSmsProcessor.instance.processIncoming(message);
+  if (processed == null) return;
 
-  final shouldSync = await DeviceSettingsCache.shouldSyncSms(
-    deviceId: deviceId,
-    simSlot: simSlot,
-    smsBody: body,
-  );
-  if (!shouldSync) return;
-
-  final address = message.address ?? '';
-  if (!SmsParser.isValidSender(address)) return;
-  final record = _buildRecord(message);
-  await StorageService.instance.appendSms(record);
-  await syncInBackground(record);
+  // Local-first: persist on device, then sync to remote DB (background-safe HTTP).
+  await StorageService.instance.appendSms(processed.record);
+  await PaymentSmsProcessor.instance.syncToServer(processed);
+  await _ingestLegacy(processed.record);
 }
 
-Future<String> _getDeviceId() async {
-  final androidId = AndroidId();
-  return await androidId.getId() ?? 'unknown';
-}
-
-SmsRecord _buildRecord(SmsMessage msg) {
-  final body = msg.body ?? '';
-  final ts = msg.date != null
-      ? DateTime.fromMillisecondsSinceEpoch(msg.date!).toIso8601String()
-      : DateTime.now().toIso8601String();
-  return SmsRecord(
-    t: ts,
-    s: SmsParser.detectSender(msg.address ?? ''),
-    m: body,
-    b: SmsParser.extractBalance(body),
-    tp: SmsParser.detectType(body),
-    am: SmsParser.extractAmount(body),
-  );
+Future<void> _ingestLegacy(SmsRecord record) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null || token.isEmpty) return;
+    ApiService.instance.setAuthToken(token);
+    await ApiService.instance.ingestSms(record);
+  } catch (_) {}
 }
 
 class SmsService {
@@ -79,36 +60,34 @@ class SmsService {
     _telephony.listenIncomingSms(
       onNewMessage: (SmsMessage message) async {
         await LocalSmsForwardService.instance.tryForwardIncomingSms(message);
-        SmsMonitoringPrefs.isMonitoringEnabled().then((enabled) async {
-          if (!enabled) return;
+        if (!await SmsServiceStatePrefs.shouldResumeService()) return;
 
-          // Check device filter settings
-          final deviceId = await _getDeviceId();
-          final simSlot = message.subscriptionId ?? 0;
-          final body = message.body ?? '';
-          final shouldSync = await DeviceSettingsCache.shouldSyncSms(
-            deviceId: deviceId,
-            simSlot: simSlot,
-            smsBody: body,
-          );
-          if (!shouldSync) return;
+        final processed =
+            await PaymentSmsProcessor.instance.processIncoming(message);
+        if (processed == null) return;
 
-          final address = message.address ?? '';
-          if (!SmsParser.isValidSender(address)) return;
-          final record = _buildRecord(message);
-          await StorageService.instance.appendSms(record);
-          await SyncService.instance.onNewSms(record);
-          onNewSms?.call(record);
-        });
+        // Local-first dual-write: disk cache → optional LAN sync → remote API.
+        await StorageService.instance.appendSms(processed.record);
+        await SyncService.instance.onNewSms(processed.record);
+        unawaited(PaymentSmsProcessor.instance.syncToServer(processed));
+        unawaited(_ingestLegacy(processed.record));
+        onNewSms?.call(processed.record);
       },
       onBackgroundMessage: onBackgroundSms,
       listenInBackground: true,
     );
   }
 
-  /// Stops telephony background SMS delivery to Dart (sets native `disable_background`).
   void stopListening() {
     if (kIsWeb || !_listening) return;
+    // Do not call listenIncomingSms(listenInBackground: false) — that sets
+    // telephony disable_background=true and breaks SMS after reboot until UI opens.
+    _listening = false;
+  }
+
+  /// User tapped Stop on Home — fully disable telephony background isolate.
+  void disableBackgroundPipeline() {
+    if (kIsWeb) return;
     _telephony.listenIncomingSms(
       onNewMessage: (_) {},
       listenInBackground: false,
@@ -116,33 +95,16 @@ class SmsService {
     _listening = false;
   }
 
-  /// Re-register listener after reboot or if native state was lost.
   Future<void> restartListeningIfEnabled() async {
     if (kIsWeb) return;
-    if (!await SmsMonitoringPrefs.isMonitoringEnabled()) return;
-    if (_listening) {
-      _telephony.listenIncomingSms(
-        onNewMessage: (_) {},
-        listenInBackground: false,
-      );
-      _listening = false;
-    }
+    if (!await SmsServiceStatePrefs.shouldResumeService()) return;
+    if (_listening) return;
     startListening();
   }
 
-  /// Import existing payment SMS from device inbox
-  Future<List<SmsRecord>> loadInboxHistory() async {
-    if (kIsWeb) return [];
-    try {
-      final messages = await _telephony.getInboxSms(
-        columns: [SmsColumn.ADDRESS, SmsColumn.BODY, SmsColumn.DATE],
-      );
-      return messages
-          .where((m) => SmsParser.isValidSender(m.address ?? ''))
-          .map(_buildRecord)
-          .toList();
-    } catch (_) {
-      return [];
-    }
-  }
+  /// Disabled — app only processes live incoming SMS, never reads device inbox.
+  Future<List<SmsRecord>> loadInboxHistory({
+    bool paymentSendersOnly = false,
+  }) async =>
+      [];
 }

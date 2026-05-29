@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 class SmsGateway {
   final String id;
@@ -27,7 +26,9 @@ class SmsGateway {
         senderId: m['senderId'] as String? ?? '',
         isActive: m['isActive'] as bool? ?? false,
         createdAt: m['createdAt'] != null
-            ? (m['createdAt'] as Timestamp).toDate()
+            ? (m['createdAt'] is String
+                ? DateTime.tryParse(m['createdAt'] as String)
+                : (m['createdAt'] as dynamic).toDate())
             : null,
       );
 

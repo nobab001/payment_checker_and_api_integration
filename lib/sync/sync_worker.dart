@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:workmanager/workmanager.dart';
 
+import '../services/sms_boot_resume.dart';
 import 'pending_queue_service.dart';
 import 'sync_api_client.dart';
 import 'sync_config.dart';
@@ -11,7 +12,9 @@ import 'sync_config.dart';
 /// delivers inbound SMS to a background Dart isolate while monitoring is ON.
 
 const _kTaskName = 'payment_checker.sms_sync_flush';
+const _kBootResumeTask = 'payment_checker.sms_boot_resume';
 const _kUniqueId = 'sms_sync_periodic';
+const _kBootResumeId = 'sms_boot_resume_once';
 
 // ── Background entry-point ────────────────────────────────────────────────────
 
@@ -25,6 +28,8 @@ void workManagerCallbackDispatcher() {
     WidgetsFlutterBinding.ensureInitialized();
     if (task == _kTaskName) {
       await _flushPendingInBackground();
+    } else if (task == _kBootResumeTask) {
+      await SmsBootResume.run();
     }
     return true; // always return true so WorkManager doesn't retry immediately
   });
@@ -82,5 +87,20 @@ class SyncWorker {
   static Future<void> cancel() async {
     if (kIsWeb) return;
     await Workmanager().cancelByUniqueName(_kUniqueId);
+    await Workmanager().cancelByUniqueName(_kBootResumeId);
+  }
+
+  /// Schedules a one-off resume ~1 min after boot (backup if foreground reboot is delayed).
+  static Future<void> scheduleBootResumeBackup() async {
+    if (kIsWeb) return;
+    await Workmanager().registerOneOffTask(
+      _kBootResumeId,
+      _kBootResumeTask,
+      initialDelay: const Duration(minutes: 1),
+      existingWorkPolicy: ExistingWorkPolicy.replace,
+      constraints: Constraints(
+        networkType: NetworkType.notRequired,
+      ),
+    );
   }
 }

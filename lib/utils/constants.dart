@@ -1,10 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../config/api_config.dart';
-
-/// @deprecated Prefer [kDefaultApiBaseUrl] from [api_config.dart].
-const String kVpsApiBaseUrl = kDefaultApiBaseUrl;
-
 class AppColors {
   static const Color primary = Color(0xFF1A237E);
   static const Color bkash = Color(0xFFE2136E);
@@ -17,11 +12,6 @@ class AppColors {
 class AppStrings {
   static const String appName = 'Payment Checker';
   static const String historyFile = 'sms_history.json';
-}
-
-class AppConfig {
-  /// Same default as [kDefaultApiBaseUrl] in `lib/config/api_config.dart`.
-  static const String apiBaseUrl = kDefaultApiBaseUrl;
 }
 
 class OperatorConfig {

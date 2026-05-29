@@ -1,11 +1,21 @@
 import '../models/sms_record.dart';
 
-/// Real-time history search: message text, amounts, balance, digits / txn-like tokens.
+/// Local-cache search: TrxID, amount, phone, message body (no API).
 bool smsRecordMatchesQuery(SmsRecord r, String query) {
   final q = query.trim();
   if (q.isEmpty) return true;
 
-  final haystack = '${r.m} ${r.s} ${r.b} ${r.am} ${r.tp}'.toLowerCase();
+  final haystack = [
+    r.m,
+    r.s,
+    r.b,
+    r.am,
+    r.tp,
+    r.trxId ?? '',
+    r.senderNumber ?? '',
+    r.simNumber ?? '',
+    r.providerTag ?? '',
+  ].join(' ').toLowerCase();
   final lowerQ = q.toLowerCase();
   if (haystack.contains(lowerQ)) return true;
 

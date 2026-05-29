@@ -53,6 +53,8 @@ object Constants {
   const val TIMESTAMP = "timestamp"
   const val ORIGINATING_ADDRESS = "originating_address"
   const val STATUS = "status"
+  const val SIM_SLOT_INDEX = "sim_slot_index"
+  const val SUBSCRIPTION_ID_EXTRA = "subscription_id"
 
   const val SETUP_HANDLE = "setupHandle"
   const val BACKGROUND_HANDLE = "backgroundHandle"

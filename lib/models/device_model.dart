@@ -6,11 +6,19 @@ class SimConfig {
   const SimConfig({this.isEnabled = true, this.filters = const []});
 
   factory SimConfig.fromJson(Map<String, dynamic> m) {
+    final senders = m['allowed_senders'] ?? m['filters'];
+    final off =
+        m['active'] == false || m['status'] == 'off' || m['isEnabled'] == false;
+    final on =
+        m['active'] == true ||
+        m['isEnabled'] == true ||
+        m['enabled'] == true ||
+        m['status'] == 'on';
     return SimConfig(
-      isEnabled: m['isEnabled'] ?? m['enabled'] ?? true,
-      filters:
-          (m['filters'] as List<dynamic>?)?.map((e) => e.toString()).toList() ??
-          [],
+      isEnabled: on || !off,
+      filters: senders is List
+          ? senders.map((e) => e.toString().trim()).where((s) => s.isNotEmpty).toList()
+          : const [],
     );
   }
 
@@ -97,6 +105,10 @@ class DeviceModel {
   final SimSettings? simSettings;
   final DateTime? createdAt;
   final DateTime? updatedAt;
+  /// Last app presence ping / registration (`devices.last_seen_at`).
+  final DateTime? lastSeenAt;
+  /// Reported on last heartbeat (`devices.last_battery_percent`), 0–100.
+  final int? lastBatteryPercent;
 
   const DeviceModel({
     required this.id,
@@ -120,9 +132,12 @@ class DeviceModel {
     this.simSettings,
     this.createdAt,
     this.updatedAt,
+    this.lastSeenAt,
+    this.lastBatteryPercent,
   });
 
-  /// Shown in lists and dialogs: custom label, else model, else registered name.
+  /// Prefer explicit presence time, else row update time.
+  DateTime? get effectiveLastSync => lastSeenAt ?? updatedAt;
   String get displayDeviceName {
     final c = customName.trim();
     if (c.isNotEmpty) return c;
@@ -165,8 +180,10 @@ class DeviceModel {
     return DeviceModel(
       id: (m['id'] is int) ? m['id'] : int.tryParse('${m['id']}') ?? 0,
       userId: (m['userId'] is int)
-          ? m['userId']
-          : int.tryParse('${m['userId']}') ?? 0,
+          ? m['userId'] as int
+          : (m['user_id'] is int)
+              ? m['user_id'] as int
+              : int.tryParse('${m['userId'] ?? m['user_id']}') ?? 0,
       deviceId: (m['device_id'] ?? m['deviceId'] ?? '').toString(),
       deviceName: (m['device_name'] ?? m['deviceName'] ?? 'My Phone') as String,
       customName: (m['custom_name'] ?? m['customName'] ?? '').toString(),
@@ -202,7 +219,19 @@ class DeviceModel {
       simSettings: sims,
       createdAt: _parseDate(m['created_at'] ?? m['createdAt']),
       updatedAt: _parseDate(m['updated_at'] ?? m['updatedAt']),
+      lastSeenAt: _parseDate(
+        m['last_seen_at'] ?? m['lastSeenAt'] ?? m['last_seen'],
+      ),
+      lastBatteryPercent: _parseBattery(
+        m['last_battery_percent'] ?? m['lastBatteryPercent'],
+      ),
     );
+  }
+
+  static int? _parseBattery(dynamic v) {
+    if (v == null) return null;
+    if (v is int) return v;
+    return int.tryParse(v.toString());
   }
 
   static DateTime? _parseDate(dynamic v) {
@@ -231,6 +260,8 @@ class DeviceModel {
     'blockIncoming': blockIncoming,
     'allowedKeywords': allowedKeywords,
     'blockedKeywords': blockedKeywords,
+    if (lastSeenAt != null) 'lastSeenAt': lastSeenAt!.toIso8601String(),
+    if (lastBatteryPercent != null) 'lastBatteryPercent': lastBatteryPercent,
   };
 }
 

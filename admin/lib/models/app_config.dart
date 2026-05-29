@@ -148,7 +148,9 @@ class AppUser {
         smsEnabled: m['smsEnabled'] as bool? ?? true,
         gmailEnabled: m['gmailEnabled'] as bool? ?? true,
         createdAt: m['createdAt'] != null
-            ? (m['createdAt'] as dynamic).toDate()
+            ? (m['createdAt'] is String
+                ? DateTime.tryParse(m['createdAt'] as String)
+                : (m['createdAt'] as dynamic).toDate())
             : null,
       );
 

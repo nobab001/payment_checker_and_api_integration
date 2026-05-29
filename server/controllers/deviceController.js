@@ -5,70 +5,193 @@
  */
 
 const {
-  emitApprovalRequestToParents,
   emitDeviceActivated,
   emitDeviceRejected,
   emitParentRoleChanged,
 } = require("../socket/deviceSocket");
+const { registerOrUpdateDevice } = require("../services/deviceRegistration");
+const { rowToDeviceJson } = require("../utils/deviceRowJson");
+const {
+  parseSimSettingsRow,
+  simSettingsToApi,
+  bodyToSimSettings,
+} = require("../utils/deviceSimSettings");
+const { deviceNeedsSecurityPin } = require("../utils/deviceAuthPolicy");
+const { verifyUserPin, upgradePinHashIfNeeded } = require("../utils/pinAuth");
+const { authorizeDeviceManagerAction } = require("../utils/deviceApprovalAuth");
 
 function parentHardwareFrom(req) {
   return String(req.headers["x-device-id"] || req.body?.deviceId || "").trim();
 }
 
-function rowToDeviceJson(row) {
-  if (!row) return null;
-  const custom = row.custom_name != null ? String(row.custom_name) : "";
-  const model = row.device_model != null ? String(row.device_model) : "";
-  const name = row.device_name != null ? String(row.device_name) : "";
-  const display =
-    custom.trim() !== ""
-      ? custom.trim()
-      : model.trim() !== ""
-        ? model.trim()
-        : name || "Device";
-  const status = row.status != null ? String(row.status) : "active";
-  const isParent = Boolean(row.is_parent);
-  return {
-    id: row.id,
-    userId: row.user_id,
-    device_id: row.device_id,
-    deviceId: row.device_id,
-    device_name: name,
-    deviceName: name,
-    custom_name: custom,
-    customName: custom,
-    status,
-    is_parent: isParent,
-    isParent,
-    device_model: model,
-    deviceModel: model,
-    android_version: row.android_version != null ? String(row.android_version) : "",
-    androidVersion: row.android_version != null ? String(row.android_version) : "",
-    sim1_number: row.sim1_number,
-    sim1Number: row.sim1_number,
-    sim1_operator: row.sim1_operator,
-    sim1Operator: row.sim1_operator,
-    sim2_number: row.sim2_number,
-    sim2Number: row.sim2_number,
-    sim2_operator: row.sim2_operator,
-    sim2Operator: row.sim2_operator,
-    sms_filter_enabled: Boolean(row.sms_filter_enabled),
-    smsFilterEnabled: Boolean(row.sms_filter_enabled),
-    block_unknown: Boolean(row.block_unknown),
-    blockUnknown: Boolean(row.block_unknown),
-    block_incoming: Boolean(row.block_incoming),
-    blockIncoming: Boolean(row.block_incoming),
-    allowed_keywords: row.allowed_keywords != null ? String(row.allowed_keywords) : "",
-    allowedKeywords: row.allowed_keywords != null ? String(row.allowed_keywords) : "",
-    blocked_keywords: row.blocked_keywords != null ? String(row.blocked_keywords) : "",
-    blockedKeywords: row.blocked_keywords != null ? String(row.blocked_keywords) : "",
-    display_name: display,
-    displayName: display,
-    created_at: row.created_at,
-    createdAt: row.created_at,
-    updated_at: row.updated_at,
-    updatedAt: row.updated_at,
-  };
+function recoveryKeyFrom(req) {
+  return String(
+    req.headers["x-parent-recovery-key"] ||
+      req.headers["x-recovery-key"] ||
+      req.body?.recoveryKey ||
+      req.body?.recovery_key ||
+      ""
+  ).trim();
+}
+
+/**
+ * Reassign account parent without the current parent handset (master recovery key).
+ * Body: target_device_id | target_device_model | target_hardware_id (device_id column)
+ */
+async function authorizeParentRecovery(pool, req) {
+  const expected = String(process.env.PARENT_RECOVERY_KEY || "").trim();
+  const providedKey = recoveryKeyFrom(req);
+  if (expected && providedKey && providedKey === expected) {
+    return { ok: true, via: "recovery_key" };
+  }
+
+  const accountPin = String(
+    req.body?.pin || req.body?.securityPin || req.body?.masterPin || ""
+  ).trim();
+  if (accountPin) {
+    const [users] = await pool.query("SELECT * FROM users WHERE id = ? LIMIT 1", [req.userId]);
+    if (users.length && verifyUserPin(users[0], accountPin)) {
+      await upgradePinHashIfNeeded(pool, req.userId, accountPin);
+      return { ok: true, via: "account_pin" };
+    }
+  }
+
+  return { ok: false };
+}
+
+async function reassignParentWithRecoveryKey(pool, io, req, res) {
+  const authz = await authorizeParentRecovery(pool, req);
+  if (!authz.ok) {
+    return res.status(403).json({
+      success: false,
+      message:
+        "Invalid recovery credentials. Use your account security PIN or PARENT_RECOVERY_KEY.",
+    });
+  }
+
+  const targetSelf =
+    req.body?.target_self === true ||
+    req.body?.targetSelf === true ||
+    String(req.body?.target || "").toLowerCase() === "self";
+  const targetId = Number(req.body?.target_device_id ?? req.body?.targetDeviceId);
+  const targetModel = String(req.body?.target_device_model ?? req.body?.targetDeviceModel ?? "").trim();
+  let targetHw = String(req.body?.target_hardware_id ?? req.body?.targetHardwareId ?? "").trim();
+  if (targetSelf) {
+    targetHw = parentHardwareFrom(req);
+    if (!targetHw) {
+      return res.status(400).json({
+        success: false,
+        message: "target_self requires X-Device-Id header (open app on the phone that should be parent)",
+      });
+    }
+  }
+
+  if (!Number.isFinite(targetId) && !targetModel && !targetHw) {
+    return res.status(400).json({
+      success: false,
+      message:
+        "Provide target_self: true, target_device_id, target_device_model, or target_hardware_id",
+    });
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    let targetRow = null;
+    if (Number.isFinite(targetId) && targetId > 0) {
+      const [rows] = await conn.query(
+        `SELECT id, status, device_model, device_id, device_name FROM devices WHERE user_id = ? AND id = ? LIMIT 1 FOR UPDATE`,
+        [req.userId, targetId]
+      );
+      targetRow = rows[0] || null;
+    } else if (targetHw) {
+      const [rows] = await conn.query(
+        `SELECT id, status, device_model, device_id, device_name FROM devices WHERE user_id = ? AND device_id = ? LIMIT 1 FOR UPDATE`,
+        [req.userId, targetHw]
+      );
+      targetRow = rows[0] || null;
+      if (!targetRow) {
+        const deviceName = String(req.body?.deviceName || req.body?.device_name || "My Phone").trim();
+        const deviceModel = String(req.body?.deviceModel || req.body?.device_model || "").trim();
+        await registerOrUpdateDevice(pool, io, {
+          userId: req.userId,
+          deviceId: targetHw,
+          deviceName: deviceName || "My Phone",
+          deviceModel,
+        });
+        const [again] = await conn.query(
+          `SELECT id, status, device_model, device_id, device_name FROM devices WHERE user_id = ? AND device_id = ? LIMIT 1 FOR UPDATE`,
+          [req.userId, targetHw]
+        );
+        targetRow = again[0] || null;
+      }
+    } else {
+      const like = `%${targetModel}%`;
+      const [rows] = await conn.query(
+        `SELECT id, status, device_model, device_id, device_name FROM devices
+         WHERE user_id = ? AND (
+           device_model LIKE ? OR device_name LIKE ? OR custom_name LIKE ?
+         )
+         ORDER BY id DESC
+         LIMIT 1 FOR UPDATE`,
+        [req.userId, like, like, like]
+      );
+      targetRow = rows[0] || null;
+    }
+
+    if (!targetRow) {
+      const [all] = await conn.query(
+        `SELECT id, device_model, device_name, device_id, status, is_parent FROM devices WHERE user_id = ? ORDER BY id DESC`,
+        [req.userId]
+      );
+      await conn.rollback();
+      return res.status(404).json({
+        success: false,
+        message:
+          "Target device not found. Open recovery on the parent phone (target_self) or check model name in the list below.",
+        devices: all.map((r) => ({
+          id: r.id,
+          device_model: r.device_model,
+          device_name: r.device_name,
+          device_id: r.device_id,
+          status: r.status,
+          is_parent: r.is_parent,
+        })),
+      });
+    }
+    if (String(targetRow.status) !== "active") {
+      await conn.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Target device must be active (approve it first if pending)",
+      });
+    }
+
+    await conn.query(`UPDATE devices SET is_parent = 0 WHERE user_id = ?`, [req.userId]);
+    await conn.query(`UPDATE devices SET is_parent = 1 WHERE user_id = ? AND id = ?`, [
+      req.userId,
+      targetRow.id,
+    ]);
+    await conn.commit();
+
+    emitParentRoleChanged(io, req.userId);
+
+    const devices = await fetchDevicesForUser(pool, req.userId);
+    return res.json({
+      success: true,
+      message: "Parent role reassigned",
+      parentDeviceId: targetRow.id,
+      devices,
+    });
+  } catch (e) {
+    try {
+      await conn.rollback();
+    } catch (_) {}
+    console.error("[reassign-parent-recovery]", e);
+    return res.status(500).json({ success: false, message: "Server error" });
+  } finally {
+    conn.release();
+  }
 }
 
 /**
@@ -104,22 +227,80 @@ async function postUpdateDeviceName(pool, req, res) {
   }
 }
 
-function registerDeviceRoutes(app, pool, authMiddleware, io = null) {
-  app.get("/api/devices", authMiddleware, async (req, res) => {
-    try {
-      const [rows] = await pool.query(
-        `SELECT * FROM devices WHERE user_id = ? ORDER BY updated_at DESC`,
-        [req.userId]
-      );
+/** Always returns a JSON array (never null/undefined) for Flutter list parsing. */
+async function fetchDevicesForUser(pool, userId) {
+  const [rows] = await pool.query(
+    `SELECT * FROM devices WHERE user_id = ? ORDER BY is_parent DESC, id DESC`,
+    [userId]
+  );
+  const list = Array.isArray(rows) ? rows : [];
+  return list.map((row) => rowToDeviceJson(row)).filter(Boolean);
+}
+
+async function handleGetDevices(pool, req, res) {
+  try {
+    const devices = await fetchDevicesForUser(pool, req.userId);
+    return res.json({ success: true, devices });
+  } catch (e) {
+    console.error("[GET devices]", e);
+    return res.status(500).json({ success: false, message: "Server error", devices: [] });
+  }
+}
+
+/** Session policy for the calling handset (X-Device-Id). */
+async function handleDeviceAccess(pool, req, res) {
+  const hw = parentHardwareFrom(req);
+  if (!hw) {
+    return res.json({
+      success: true,
+      registered: false,
+      requiresApproval: false,
+      requiresSecurityPin: false,
+      isParent: false,
+      message: "No device id on request",
+    });
+  }
+  try {
+    const [rows] = await pool.query(
+      `SELECT * FROM devices WHERE user_id = ? AND device_id = ? LIMIT 1`,
+      [req.userId, hw]
+    );
+    if (!rows.length) {
       return res.json({
         success: true,
-        devices: rows.map(rowToDeviceJson),
+        registered: false,
+        requiresApproval: false,
+        requiresSecurityPin: false,
+        isParent: false,
       });
-    } catch (e) {
-      console.error(e);
-      return res.status(500).json({ success: false, message: "Server error" });
     }
-  });
+    const device = rowToDeviceJson(rows[0]);
+    const requiresApproval = String(rows[0].status) === "pending";
+    const requiresSecurityPin = deviceNeedsSecurityPin(device, requiresApproval);
+    return res.json({
+      success: true,
+      registered: true,
+      device,
+      requiresApproval,
+      requiresSecurityPin,
+      isParent: Boolean(device.is_parent || device.isParent),
+    });
+  } catch (e) {
+    console.error("[GET /api/auth/device-access]", e);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+}
+
+function registerDeviceRoutes(app, pool, authMiddleware, io = null) {
+  const getDevicesHandler = (req, res) => handleGetDevices(pool, req, res);
+
+  app.get("/api/auth/device-access", authMiddleware, (req, res) =>
+    handleDeviceAccess(pool, req, res)
+  );
+
+  app.get("/api/devices", authMiddleware, getDevicesHandler);
+  app.get("/api/get-devices", authMiddleware, getDevicesHandler);
+  app.get("/get-devices", authMiddleware, getDevicesHandler);
 
   app.get("/api/devices/self", authMiddleware, async (req, res) => {
     const deviceId = String(req.query?.deviceId || req.query?.device_id || "").trim();
@@ -141,6 +322,41 @@ function registerDeviceRoutes(app, pool, authMiddleware, io = null) {
     }
   });
 
+  /** Presence + optional battery for the calling device (`X-Device-Id`). */
+  app.post("/api/devices/self/heartbeat", authMiddleware, async (req, res) => {
+    const deviceId = parentHardwareFrom(req);
+    if (!deviceId) {
+      return res
+        .status(400)
+        .json({ success: false, message: "X-Device-Id header or deviceId body required" });
+    }
+    const raw = req.body?.batteryPercent ?? req.body?.battery;
+    let bat = null;
+    if (raw != null && raw !== "") {
+      const n = Number(raw);
+      if (Number.isFinite(n)) bat = Math.max(0, Math.min(100, Math.round(n)));
+    }
+    try {
+      if (bat != null) {
+        await pool.query(
+          `UPDATE devices SET last_seen_at = CURRENT_TIMESTAMP, last_battery_percent = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE user_id = ? AND device_id = ?`,
+          [bat, req.userId, deviceId]
+        );
+      } else {
+        await pool.query(
+          `UPDATE devices SET last_seen_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+           WHERE user_id = ? AND device_id = ?`,
+          [req.userId, deviceId]
+        );
+      }
+      return res.json({ success: true });
+    } catch (e) {
+      console.error("[POST /api/devices/self/heartbeat]", e);
+      return res.status(500).json({ success: false, message: "Server error" });
+    }
+  });
+
   app.post("/api/devices", authMiddleware, async (req, res) => {
     const deviceId = String(req.body?.deviceId || req.body?.device_id || "").trim();
     const deviceName = String(req.body?.deviceName || req.body?.device_name || "My Phone").trim() || "My Phone";
@@ -149,52 +365,26 @@ function registerDeviceRoutes(app, pool, authMiddleware, io = null) {
       return res.status(400).json({ success: false, message: "deviceId required" });
     }
     try {
-      const [[{ cnt }]] = await pool.query(`SELECT COUNT(*) AS cnt FROM devices WHERE user_id = ?`, [
-        req.userId,
-      ]);
-      const isFirstAccountDevice = Number(cnt) === 0;
-
-      const [existing] = await pool.query(
-        `SELECT * FROM devices WHERE user_id = ? AND device_id = ? LIMIT 1`,
-        [req.userId, deviceId]
-      );
-
-      if (existing.length) {
-        await pool.query(
-          `UPDATE devices SET
-             device_name = ?,
-             device_model = IF(? <> '', ?, device_model),
-             updated_at = CURRENT_TIMESTAMP
-           WHERE id = ?`,
-          [deviceName, deviceModel, deviceModel, existing[0].id]
-        );
-      } else {
-        const status = isFirstAccountDevice ? "active" : "pending";
-        const isParent = isFirstAccountDevice ? 1 : 0;
-        await pool.query(
-          `INSERT INTO devices (user_id, device_id, device_name, device_model, status, is_parent)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [req.userId, deviceId, deviceName, deviceModel, status, isParent]
-        );
-      }
-
-      const [rows] = await pool.query(
-        `SELECT * FROM devices WHERE user_id = ? AND device_id = ? LIMIT 1`,
-        [req.userId, deviceId]
-      );
-      const row = rows[0];
-      const json = rowToDeviceJson(row);
-
-      if (io && String(row.status) === "pending" && !existing.length) {
-        await emitApprovalRequestToParents(io, req.userId, json);
-      }
-
-      return res.json({ success: true, device: json });
+      const result = await registerOrUpdateDevice(pool, io, {
+        userId: req.userId,
+        deviceId,
+        deviceName,
+        deviceModel,
+      });
+      return res.json({
+        success: true,
+        device: result.device,
+        requiresApproval: result.requiresApproval,
+      });
     } catch (e) {
       console.error(e);
       return res.status(500).json({ success: false, message: "Server error" });
     }
   });
+
+  app.post("/api/devices/reassign-parent", authMiddleware, (req, res) =>
+    reassignParentWithRecoveryKey(pool, io, req, res)
+  );
 
   app.post("/api/devices/transfer-parent", authMiddleware, async (req, res) => {
     const parentHw = parentHardwareFrom(req);
@@ -230,7 +420,7 @@ function registerDeviceRoutes(app, pool, authMiddleware, io = null) {
 
       emitParentRoleChanged(io, req.userId);
 
-      const [rows] = await pool.query(`SELECT * FROM devices WHERE user_id = ? ORDER BY updated_at DESC`, [
+      const [rows] = await pool.query(`SELECT * FROM devices WHERE user_id = ? ORDER BY id DESC`, [
         req.userId,
       ]);
       return res.json({ success: true, devices: rows.map(rowToDeviceJson) });
@@ -247,20 +437,17 @@ function registerDeviceRoutes(app, pool, authMiddleware, io = null) {
 
   app.post("/api/devices/:id/approve", authMiddleware, async (req, res) => {
     const id = Number(req.params.id);
-    const parentHw = parentHardwareFrom(req);
     if (!Number.isFinite(id) || id <= 0) {
       return res.status(400).json({ success: false, message: "invalid id" });
     }
-    if (!parentHw) {
-      return res.status(400).json({ success: false, message: "deviceId (parent hardware) required" });
-    }
     try {
-      const [parents] = await pool.query(
-        `SELECT id FROM devices WHERE user_id = ? AND device_id = ? AND is_parent = 1 LIMIT 1`,
-        [req.userId, parentHw]
-      );
-      if (!parents.length) {
-        return res.status(403).json({ success: false, message: "Only the parent device can approve" });
+      const authz = await authorizeDeviceManagerAction(pool, req);
+      if (!authz.ok) {
+        return res.status(authz.status || 403).json({
+          success: false,
+          message: authz.message,
+          requiresPin: authz.requiresPin === true,
+        });
       }
       const [pending] = await pool.query(
         `SELECT * FROM devices WHERE user_id = ? AND id = ? AND status = 'pending' LIMIT 1`,
@@ -288,20 +475,17 @@ function registerDeviceRoutes(app, pool, authMiddleware, io = null) {
 
   app.post("/api/devices/:id/reject", authMiddleware, async (req, res) => {
     const id = Number(req.params.id);
-    const parentHw = parentHardwareFrom(req);
     if (!Number.isFinite(id) || id <= 0) {
       return res.status(400).json({ success: false, message: "invalid id" });
     }
-    if (!parentHw) {
-      return res.status(400).json({ success: false, message: "deviceId (parent hardware) required" });
-    }
     try {
-      const [parents] = await pool.query(
-        `SELECT id FROM devices WHERE user_id = ? AND device_id = ? AND is_parent = 1 LIMIT 1`,
-        [req.userId, parentHw]
-      );
-      if (!parents.length) {
-        return res.status(403).json({ success: false, message: "Only the parent device can reject" });
+      const authz = await authorizeDeviceManagerAction(pool, req);
+      if (!authz.ok) {
+        return res.status(authz.status || 403).json({
+          success: false,
+          message: authz.message,
+          requiresPin: authz.requiresPin === true,
+        });
       }
       const [pending] = await pool.query(
         `SELECT id FROM devices WHERE user_id = ? AND id = ? AND status = 'pending' LIMIT 1`,
@@ -319,9 +503,10 @@ function registerDeviceRoutes(app, pool, authMiddleware, io = null) {
     }
   });
 
-  app.post("/api/update-device-name", authMiddleware, (req, res) =>
-    postUpdateDeviceName(pool, req, res)
-  );
+  const renameHandler = (req, res) => postUpdateDeviceName(pool, req, res);
+  app.post("/api/update-device-name", authMiddleware, renameHandler);
+  app.post("/api/rename-device", authMiddleware, renameHandler);
+  app.post("/rename-device", authMiddleware, renameHandler);
 
   app.put("/api/devices/:id", authMiddleware, async (req, res) => {
     const id = Number(req.params.id);
@@ -351,40 +536,103 @@ function registerDeviceRoutes(app, pool, authMiddleware, io = null) {
     }
   });
 
+  async function assertCanManageDeviceSettings(conn, userId, targetRow, req) {
+    const callerHw = parentHardwareFrom(req);
+    if (!callerHw) return true;
+    const [callerRows] = await conn.query(
+      `SELECT id, device_id, is_parent FROM devices WHERE user_id = ? AND device_id = ? LIMIT 1`,
+      [userId, callerHw]
+    );
+    if (!callerRows.length) return true;
+    const caller = callerRows[0];
+    if (String(caller.device_id) === String(targetRow.device_id)) return true;
+    if (!caller.is_parent) {
+      const err = new Error("Only the parent device can change settings for other devices");
+      err.status = 403;
+      throw err;
+    }
+    return true;
+  }
+
+  app.get("/api/devices/:id/settings", authMiddleware, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ success: false, message: "invalid id" });
+    }
+    try {
+      const [rows] = await pool.query(`SELECT * FROM devices WHERE id = ? AND user_id = ? LIMIT 1`, [
+        id,
+        req.userId,
+      ]);
+      if (!rows.length) {
+        return res.status(404).json({ success: false, message: "Device not found" });
+      }
+      const parsed = parseSimSettingsRow(rows[0]);
+      return res.json({
+        success: true,
+        child_device_id: rows[0].device_id,
+        config: simSettingsToApi(parsed),
+        device: rowToDeviceJson(rows[0]),
+      });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ success: false, message: "Server error" });
+    }
+  });
+
   app.put("/api/devices/:id/settings", authMiddleware, async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id) || id <= 0) {
       return res.status(400).json({ success: false, message: "invalid id" });
     }
-    const sim1 = req.body?.sim1 || {};
-    const sim2 = req.body?.sim2 || {};
-    const sim1On = sim1.status === "on" || sim1.isEnabled === true;
-    const sim2On = sim2.status === "on" || sim2.isEnabled === true;
-    const f1 = Array.isArray(sim1.filters) ? sim1.filters.map((x) => String(x).trim()).filter(Boolean) : [];
-    const f2 = Array.isArray(sim2.filters) ? sim2.filters.map((x) => String(x).trim()).filter(Boolean) : [];
-    const smsFilter = sim1On || sim2On;
-    const allowed = f1.join(",");
-    const blocked = f2.join(",");
+    const { parsed, json, smsFilterEnabled, allowedKeywords, blockedKeywords } =
+      bodyToSimSettings(req.body);
 
+    const conn = await pool.getConnection();
     try {
-      const [r] = await pool.query(
-        `UPDATE devices SET
-           sms_filter_enabled = ?, allowed_keywords = ?, blocked_keywords = ?,
-           updated_at = CURRENT_TIMESTAMP
-         WHERE id = ? AND user_id = ?`,
-        [smsFilter ? 1 : 0, allowed, blocked, id, req.userId]
+      await conn.beginTransaction();
+      const [targets] = await conn.query(
+        `SELECT * FROM devices WHERE id = ? AND user_id = ? LIMIT 1 FOR UPDATE`,
+        [id, req.userId]
       );
-      if (r.affectedRows === 0) {
+      if (!targets.length) {
+        await conn.rollback();
         return res.status(404).json({ success: false, message: "Device not found" });
       }
+      try {
+        await assertCanManageDeviceSettings(conn, req.userId, targets[0], req);
+      } catch (e) {
+        await conn.rollback();
+        return res.status(e.status || 403).json({ success: false, message: e.message });
+      }
+      await conn.query(
+        `UPDATE devices SET
+           sim_settings = CAST(? AS JSON),
+           sms_filter_enabled = ?,
+           allowed_keywords = ?,
+           blocked_keywords = ?,
+           updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND user_id = ?`,
+        [json, smsFilterEnabled, allowedKeywords, blockedKeywords, id, req.userId]
+      );
+      await conn.commit();
       const [rows] = await pool.query(`SELECT * FROM devices WHERE id = ? AND user_id = ? LIMIT 1`, [
         id,
         req.userId,
       ]);
-      return res.json({ success: true, device: rowToDeviceJson(rows[0]) });
+      return res.json({
+        success: true,
+        config: simSettingsToApi(parsed),
+        device: rowToDeviceJson(rows[0]),
+      });
     } catch (e) {
+      try {
+        await conn.rollback();
+      } catch (_) {}
       console.error(e);
       return res.status(500).json({ success: false, message: "Server error" });
+    } finally {
+      conn.release();
     }
   });
 
@@ -410,4 +658,5 @@ module.exports = {
   registerDeviceRoutes,
   rowToDeviceJson,
   postUpdateDeviceName,
+  fetchDevicesForUser,
 };

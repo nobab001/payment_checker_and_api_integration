@@ -30,6 +30,15 @@ class SmsParser {
         a.contains('ucb');
   }
 
+  /// MFS short name if recognized, otherwise raw number/sender (truncated for API).
+  static String senderLabelForBackup(String? address) {
+    final a = address?.trim() ?? '';
+    if (a.isEmpty) return 'Unknown';
+    final d = detectSender(a);
+    final label = d.isNotEmpty ? d : a;
+    return label.length > 64 ? label.substring(0, 64) : label;
+  }
+
   static double extractAmount(String body) {
     final m = _amountRx.firstMatch(body);
     if (m == null) return 0.0;
