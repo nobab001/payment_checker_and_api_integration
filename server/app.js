@@ -178,9 +178,7 @@ async function initSettingsTable() {
   
   const defaults = {
     global: JSON.stringify({ smsApiEnabled: true, gmailApiEnabled: true, userRegistrationEnabled: true, appEnabled: true }),
-    apiKeys: JSON.stringify({ smsApiKey: "", smsApiEndpoint: "", gmailApiKey: "", gmailApiEndpoint: "" }),
     socialLinks: JSON.stringify({ whatsapp: "", facebook: "", telegram: "", youtube: "" }),
-    emailConfig: JSON.stringify({ gmailAddress: "", appPassword: "" }),
     paymentSettings: JSON.stringify({ bkashApiKey: "", bkashSecretKey: "", bkashAppId: "", bkashPassword: "", testMode: true, bkashCallbackUrl: "" })
   };
 

@@ -538,7 +538,7 @@ void _showEmailAccountDialog(
             ),
             icon: const Icon(Icons.save, size: 18),
             label: Text(isEdit ? 'Update' : 'Add'),
-            onPressed: () {
+            onPressed: () async {
               final email = emailCtrl.text.trim();
               final pass = passCtrl.text.trim();
               final limit = int.tryParse(limitCtrl.text.trim()) ?? 500;
@@ -567,12 +567,19 @@ void _showEmailAccountDialog(
                 dailyLimit: limit,
                 isActive: existing?.isActive ?? false,
               );
-              if (isEdit) {
-                cfg.updateEmailAccount(a);
-              } else {
-                cfg.addEmailAccount(a);
+              final ok = isEdit
+                  ? await cfg.updateEmailAccount(a)
+                  : await cfg.addEmailAccount(a);
+              if (!ok && ctx.mounted) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  SnackBar(
+                    content: Text('Save failed: ${cfg.saveError}'),
+                    backgroundColor: Colors.red[700],
+                  ),
+                );
+                return;
               }
-              Navigator.pop(ctx);
+              if (ctx.mounted) Navigator.pop(ctx);
             },
           ),
         ],
@@ -1244,7 +1251,7 @@ void _showGatewayDialog(
           ),
           icon: const Icon(Icons.save, size: 18),
           label: Text(isEdit ? 'Update' : 'Add'),
-          onPressed: () {
+          onPressed: () async {
             final name = nameCtrl.text.trim();
             final key = keyCtrl.text.trim();
             final endpoint = endpointCtrl.text.trim();
@@ -1266,12 +1273,19 @@ void _showGatewayDialog(
               senderId: senderCtrl.text.trim(),
               isActive: existing?.isActive ?? false,
             );
-            if (isEdit) {
-              cfg.updateSmsGateway(gw);
-            } else {
-              cfg.addSmsGateway(gw);
+            final ok = isEdit
+                ? await cfg.updateSmsGateway(gw)
+                : await cfg.addSmsGateway(gw);
+            if (!ok && ctx.mounted) {
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                SnackBar(
+                  content: Text('Save failed: ${cfg.saveError}'),
+                  backgroundColor: Colors.red[700],
+                ),
+              );
+              return;
             }
-            Navigator.pop(ctx);
+            if (ctx.mounted) Navigator.pop(ctx);
           },
         ),
       ],

@@ -12,7 +12,11 @@ ALTER TABLE users
   ADD COLUMN IF NOT EXISTS email_verified    TINYINT(1)    NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS history_premium_until DATETIME  DEFAULT NULL;
 
--- 2. sms_settings table তৈরি করুন
+-- 2a. sms_settings table-এ username column যোগ করুন (যদি পুরোনো table exist করে)
+ALTER TABLE sms_settings
+  ADD COLUMN IF NOT EXISTS username VARCHAR(255) DEFAULT NULL COMMENT 'SMS provider username (optional)';
+
+-- 2b. sms_settings table তৈরি করুন
 CREATE TABLE IF NOT EXISTS sms_settings (
   id                  INT AUTO_INCREMENT PRIMARY KEY,
   gateway_url         VARCHAR(512)  NOT NULL COMMENT 'SMS gateway base URL with placeholders',
