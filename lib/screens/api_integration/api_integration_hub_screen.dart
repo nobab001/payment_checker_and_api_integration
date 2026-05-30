@@ -180,6 +180,31 @@ class _ApiIntegrationHubScreenState extends State<ApiIntegrationHubScreen> {
                       child: ListView(
                         padding: const EdgeInsets.all(12),
                         children: [
+                          FilledButton.icon(
+                            onPressed: () async {
+                              await Navigator.push<void>(
+                                context,
+                                MaterialPageRoute<void>(
+                                  builder: (_) => CheckoutDesignerScreen(
+                                    merchantId: _sites.first.id,
+                                    siteName: _sites.first.siteName,
+                                    isEmbedded: false,
+                                  ),
+                                ),
+                              );
+                              await _load();
+                            },
+                            icon: const Icon(Icons.palette_outlined),
+                            label: const Text('গেটওয়ে ভিউ কাস্টমাইজার'),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: AppColors.primary,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 20),
                           const Text(
                             'ওয়েবসাইটসমূহ (Merchant Sites)',
                             style: TextStyle(
@@ -216,17 +241,6 @@ class _ApiIntegrationHubScreenState extends State<ApiIntegrationHubScreen> {
                                 },
                               ),
                             ),
-                          const SizedBox(height: 16),
-                          const Divider(),
-                          const SizedBox(height: 12),
-                          SizedBox(
-                            height: 650,
-                            child: CheckoutDesignerScreen(
-                              merchantId: _sites.first.id,
-                              siteName: _sites.first.siteName,
-                              isEmbedded: true,
-                            ),
-                          ),
                         ],
                       ),
                     ),
