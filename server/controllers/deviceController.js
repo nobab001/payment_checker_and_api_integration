@@ -585,7 +585,7 @@ function registerDeviceRoutes(app, pool, authMiddleware, io = null) {
     if (!Number.isFinite(id) || id <= 0) {
       return res.status(400).json({ success: false, message: "invalid id" });
     }
-    const { parsed, json, smsFilterEnabled, allowedKeywords, blockedKeywords } =
+    const { parsed, json, smsFilterEnabled, allowedKeywords, blockedKeywords, sim1Number, sim2Number } =
       bodyToSimSettings(req.body);
 
     const conn = await pool.getConnection();
@@ -611,9 +611,11 @@ function registerDeviceRoutes(app, pool, authMiddleware, io = null) {
            sms_filter_enabled = ?,
            allowed_keywords = ?,
            blocked_keywords = ?,
+           sim1_number = ?,
+           sim2_number = ?,
            updated_at = CURRENT_TIMESTAMP
          WHERE id = ? AND user_id = ?`,
-        [json, smsFilterEnabled, allowedKeywords, blockedKeywords, id, req.userId]
+        [json, smsFilterEnabled, allowedKeywords, blockedKeywords, sim1Number, sim2Number, id, req.userId]
       );
       await conn.commit();
       const [rows] = await pool.query(`SELECT * FROM devices WHERE id = ? AND user_id = ? LIMIT 1`, [

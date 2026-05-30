@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/checkout_layout.dart';
 import '../models/sim_filter_preferences.dart';
 import '../services/sms_automation_prefs.dart';
 import '../utils/device_setup_validator.dart';
@@ -18,6 +20,7 @@ class SimFilterLocalRepository {
   static const String kSim1ProviderTags = 'sim_1_provider_tags';
   static const String kSim1CustomSenders = 'sim_1_custom_senders';
   static const String kSim2Active = 'sim_2_active';
+  static const String kBankAccounts = 'device_bank_accounts_v1';
   static const String kSim2AllowedSenders = 'sim_2_allowed_senders';
   static const String kSim2Number = 'sim_2_number';
   static const String kSim2ProviderTags = 'sim_2_provider_tags';
@@ -127,6 +130,15 @@ class SimFilterLocalRepository {
     final sim2List = sp.getStringList(kSim2AllowedSenders) ??
         sp.getStringList(kLegacySim2List) ??
         const <String>[];
+    final bankAccountsRaw = sp.getString(kBankAccounts) ?? '[]';
+    List<CheckoutNumberSlot> bankAccounts = const [];
+    try {
+      final decoded = jsonDecode(bankAccountsRaw) as List<dynamic>;
+      bankAccounts = decoded
+          .map((e) => CheckoutNumberSlot.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList();
+    } catch (_) {}
+
     return SimFilterPreferences(
       sim1Active: sp.getBool(kSim1Active) ?? false,
       sim1AllowedSenders: canonicalizeAllowedSenderList(sim1List),
@@ -138,12 +150,14 @@ class SimFilterLocalRepository {
       sim2Number: sp.getString(kSim2Number) ?? '',
       sim2ProviderTags: sp.getStringList(kSim2ProviderTags) ?? const [],
       sim2CustomSenders: sp.getStringList(kSim2CustomSenders) ?? const [],
+      bankAccounts: bankAccounts,
     );
   }
 
   /// Writes all SIM keys to disk with await on every field.
   Future<void> save(SimFilterPreferences prefs) async {
     final sp = await _sp();
+    final bankAccountsJson = jsonEncode(prefs.bankAccounts.map((e) => e.toJson()).toList());
     final ok = <bool>[
       await sp.setBool(kSim1Active, prefs.sim1Active),
       await sp.setStringList(kSim1AllowedSenders, prefs.sim1AllowedSenders),
@@ -155,6 +169,7 @@ class SimFilterLocalRepository {
       await sp.setString(kSim2Number, prefs.sim2Number),
       await sp.setStringList(kSim2ProviderTags, prefs.sim2ProviderTags),
       await sp.setStringList(kSim2CustomSenders, prefs.sim2CustomSenders),
+      await sp.setString(kBankAccounts, bankAccountsJson),
     ];
     if (kDebugMode && ok.contains(false)) {
       debugPrint('[SimFilterLocalRepository] some prefs writes returned false');

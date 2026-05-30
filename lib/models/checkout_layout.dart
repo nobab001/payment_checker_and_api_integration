@@ -67,11 +67,13 @@ class CheckoutBlockConfig {
   final String id;
   final String title;
   final List<CheckoutNumberSlot> numbers;
+  final bool enabled;
 
   const CheckoutBlockConfig({
     required this.id,
     required this.title,
     required this.numbers,
+    this.enabled = true,
   });
 
   factory CheckoutBlockConfig.fromJson(String id, Map<String, dynamic> j) =>
@@ -82,12 +84,26 @@ class CheckoutBlockConfig {
             .map((e) => CheckoutNumberSlot.fromJson(
                 Map<String, dynamic>.from(e as Map)))
             .toList(),
+        enabled: j['enabled'] != false,
       );
 
   Map<String, dynamic> toJson() => {
         'title': title,
         'numbers': numbers.map((n) => n.toJson()).toList(),
+        'enabled': enabled,
       };
+
+  CheckoutBlockConfig copyWith({
+    String? title,
+    List<CheckoutNumberSlot>? numbers,
+    bool? enabled,
+  }) =>
+      CheckoutBlockConfig(
+        id: id,
+        title: title ?? this.title,
+        numbers: numbers ?? this.numbers,
+        enabled: enabled ?? this.enabled,
+      );
 }
 
 class CheckoutLayout {

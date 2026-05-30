@@ -1,3 +1,4 @@
+import 'checkout_layout.dart';
 import 'device_model.dart';
 
 /// Parent → child remote SIM configuration (server canonical schema).
@@ -6,12 +7,18 @@ class ChildDeviceRemoteConfig {
   final String childHardwareDeviceId;
   final SimSlotRemoteConfig sim1;
   final SimSlotRemoteConfig sim2;
+  final String sim1Number;
+  final String sim2Number;
+  final List<CheckoutNumberSlot> bankAccounts;
 
   const ChildDeviceRemoteConfig({
     required this.childDeviceRowId,
     required this.childHardwareDeviceId,
     required this.sim1,
     required this.sim2,
+    this.sim1Number = '',
+    this.sim2Number = '',
+    this.bankAccounts = const [],
   });
 
   factory ChildDeviceRemoteConfig.fromDevice(DeviceModel device) {
@@ -20,12 +27,16 @@ class ChildDeviceRemoteConfig {
         SimSettings(
           sim1: SimConfig(isEnabled: device.smsFilterEnabled),
           sim2: SimConfig(isEnabled: device.smsFilterEnabled),
+          bankAccounts: const [],
         );
     return ChildDeviceRemoteConfig(
       childDeviceRowId: device.id,
       childHardwareDeviceId: device.deviceId,
       sim1: SimSlotRemoteConfig.fromSimConfig(sims.sim1),
       sim2: SimSlotRemoteConfig.fromSimConfig(sims.sim2),
+      sim1Number: device.sim1Number ?? '',
+      sim2Number: device.sim2Number ?? '',
+      bankAccounts: sims.bankAccounts,
     );
   }
 
@@ -35,17 +46,26 @@ class ChildDeviceRemoteConfig {
     required String childHardwareDeviceId,
   }) {
     final sim = json['sim_settings'] as Map<String, dynamic>? ?? json;
+    final list = sim['bank_accounts'] as List<dynamic>? ?? sim['bankAccounts'] as List<dynamic>? ?? [];
     return ChildDeviceRemoteConfig(
       childDeviceRowId: childDeviceRowId,
       childHardwareDeviceId: childHardwareDeviceId,
       sim1: SimSlotRemoteConfig.fromJson(sim['sim1'] as Map<String, dynamic>? ?? {}),
       sim2: SimSlotRemoteConfig.fromJson(sim['sim2'] as Map<String, dynamic>? ?? {}),
+      sim1Number: (json['sim1_number'] ?? json['sim1Number'] ?? '').toString(),
+      sim2Number: (json['sim2_number'] ?? json['sim2Number'] ?? '').toString(),
+      bankAccounts: list
+          .map((e) => CheckoutNumberSlot.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList(),
     );
   }
 
   Map<String, dynamic> toApiBody() => {
     'sim1': sim1.toApiJson(),
     'sim2': sim2.toApiJson(),
+    'sim1_number': sim1Number,
+    'sim2_number': sim2Number,
+    'bank_accounts': bankAccounts.map((e) => e.toJson()).toList(),
   };
 
   /// Firestore-style document (optional backend).
@@ -62,12 +82,18 @@ class ChildDeviceRemoteConfig {
   ChildDeviceRemoteConfig copyWith({
     SimSlotRemoteConfig? sim1,
     SimSlotRemoteConfig? sim2,
+    String? sim1Number,
+    String? sim2Number,
+    List<CheckoutNumberSlot>? bankAccounts,
   }) =>
       ChildDeviceRemoteConfig(
         childDeviceRowId: childDeviceRowId,
         childHardwareDeviceId: childHardwareDeviceId,
         sim1: sim1 ?? this.sim1,
         sim2: sim2 ?? this.sim2,
+        sim1Number: sim1Number ?? this.sim1Number,
+        sim2Number: sim2Number ?? this.sim2Number,
+        bankAccounts: bankAccounts ?? this.bankAccounts,
       );
 }
 

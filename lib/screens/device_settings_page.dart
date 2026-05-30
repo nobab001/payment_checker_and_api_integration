@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../models/checkout_layout.dart';
 import '../models/child_device_remote_config.dart';
 import '../models/device_model.dart';
 import '../models/sim_filter_preferences.dart';
@@ -234,6 +235,7 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
       sim2Number: widget.device.sim2Number ?? '',
       sim2ProviderTags: sim2ProviderTags,
       sim2CustomSenders: sim2CustomSenders,
+      bankAccounts: cfg.bankAccounts,
     );
   }
 
@@ -248,6 +250,9 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
         active: _prefs.sim2Active,
         allowedSenders: _prefs.sim2AllowedSenders,
       ),
+      sim1Number: _prefs.sim1Number,
+      sim2Number: _prefs.sim2Number,
+      bankAccounts: _prefs.bankAccounts,
     );
   }
 
@@ -397,6 +402,11 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
         await _remoteRepo.save(_remoteFromPrefs());
       } else {
         await _localRepo.saveVerified(_prefs);
+        try {
+          await _remoteRepo.save(_remoteFromPrefs());
+        } catch (e) {
+          debugPrint('[DeviceSettingsPage] failed to sync settings to server: $e');
+        }
         await SmsServiceStatePrefs.setDeviceConfigured(true);
         await SmsTemplateCache.instance.refreshFromServer(force: true);
       }
@@ -527,6 +537,8 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
                   onRemoveCustom: (s) => _removeCustomSender(false, s),
                   onProviderToggle: (tag, v) => _toggleProvider(false, tag, v),
                 ),
+                const SizedBox(height: 16),
+                _bankSection(),
                 const SizedBox(height: 20),
                 Card(
                   color: Colors.blue.shade50,
@@ -741,5 +753,185 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
         ),
       ),
     );
+  }
+
+  Widget _bankSection() {
+    final list = _prefs.bankAccounts;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.account_balance, color: AppColors.primary),
+                const SizedBox(width: 12),
+                const Text(
+                  'ব্যাংক অ্যাকাউন্টসমূহ (সর্বোচ্চ ৫টি)',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                ),
+                const Spacer(),
+                if (list.length < 5)
+                  IconButton(
+                    icon: const Icon(Icons.add_circle_outline, color: AppColors.primary),
+                    onPressed: () => _showBankDialog(),
+                  ),
+              ],
+            ),
+            const Divider(height: 24),
+            if (list.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Text(
+                  'কোনো ব্যাংক অ্যাকাউন্ট যোগ করা হয়নি।',
+                  style: TextStyle(color: Colors.grey, fontSize: 13),
+                ),
+              )
+            else
+              ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: list.length,
+                separatorBuilder: (_, _) => const Divider(),
+                itemBuilder: (context, idx) {
+                  final b = list[idx];
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(
+                      '${b.bankName} — ${b.phone}',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
+                    subtitle: Text(
+                      'Name: ${b.accountName ?? ''}\nBranch: ${b.branch ?? ''}',
+                      style: const TextStyle(fontSize: 12, height: 1.4),
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.edit, size: 20),
+                          onPressed: () => _showBankDialog(indexToEdit: idx),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
+                          onPressed: () => _deleteBank(idx),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showBankDialog({int? indexToEdit}) {
+    final isEditing = indexToEdit != null;
+    final editSlot = isEditing ? _prefs.bankAccounts[indexToEdit] : null;
+
+    final bankCtrl = TextEditingController(text: editSlot?.bankName ?? '');
+    final nameCtrl = TextEditingController(text: editSlot?.accountName ?? '');
+    final branchCtrl = TextEditingController(text: editSlot?.branch ?? '');
+    final numCtrl = TextEditingController(text: editSlot?.phone ?? '');
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(isEditing ? 'ব্যাংক অ্যাকাউন্ট পরিবর্তন' : 'নতুন ব্যাংক অ্যাকাউন্ট যোগ'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: bankCtrl,
+                textCapitalization: TextCapitalization.characters,
+                decoration: const InputDecoration(labelText: 'ব্যাংকের নাম (যেমন DBBL)'),
+              ),
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(labelText: 'অ্যাকাউন্ট নাম (যেমন John Doe)'),
+              ),
+              TextField(
+                controller: branchCtrl,
+                decoration: const InputDecoration(labelText: 'শাখা (যেমন Motijheel)'),
+              ),
+              TextField(
+                controller: numCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'অ্যাকাউন্ট নম্বর'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('বাতিল'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final bankName = bankCtrl.text.trim();
+              final accountName = nameCtrl.text.trim();
+              final branch = branchCtrl.text.trim();
+              final phone = numCtrl.text.trim();
+
+              if (bankName.isEmpty || phone.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('ব্যাংকের নাম এবং অ্যাকাউন্ট নম্বর বাধ্যতামূলক')),
+                );
+                return;
+              }
+
+              setState(() {
+                final list = List<CheckoutNumberSlot>.from(_prefs.bankAccounts);
+                if (isEditing) {
+                  list[indexToEdit] = CheckoutNumberSlot(
+                    simSlot: 1,
+                    phone: phone,
+                    enabled: editSlot?.enabled ?? true,
+                    position: editSlot?.position ?? (indexToEdit + 1),
+                    bankName: bankName,
+                    accountName: accountName,
+                    branch: branch,
+                    accountNumber: phone,
+                  );
+                } else {
+                  list.add(CheckoutNumberSlot(
+                    simSlot: 1,
+                    phone: phone,
+                    enabled: true,
+                    position: list.length + 1,
+                    bankName: bankName,
+                    accountName: accountName,
+                    branch: branch,
+                    accountNumber: phone,
+                  ));
+                }
+                _prefs = _prefs.copyWith(bankAccounts: list);
+              });
+              unawaited(_persistLocally());
+              Navigator.pop(ctx);
+            },
+            style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
+            child: Text(isEditing ? 'পরিবর্তন করুন' : 'যোগ করুন'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _deleteBank(int index) {
+    setState(() {
+      final list = List<CheckoutNumberSlot>.from(_prefs.bankAccounts)..removeAt(index);
+      for (var i = 0; i < list.length; i++) {
+        list[i] = list[i].copyWith(position: i + 1);
+      }
+      _prefs = _prefs.copyWith(bankAccounts: list);
+    });
+    unawaited(_persistLocally());
   }
 }

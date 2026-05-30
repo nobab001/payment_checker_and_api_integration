@@ -1,3 +1,5 @@
+import 'checkout_layout.dart';
+
 /// Per-SIM filter configuration
 class SimConfig {
   final bool isEnabled;
@@ -34,19 +36,29 @@ class SimConfig {
 class SimSettings {
   final SimConfig sim1;
   final SimConfig sim2;
+  final List<CheckoutNumberSlot> bankAccounts;
 
-  const SimSettings({required this.sim1, required this.sim2});
+  const SimSettings({
+    required this.sim1,
+    required this.sim2,
+    this.bankAccounts = const [],
+  });
 
   factory SimSettings.fromJson(Map<String, dynamic> m) {
+    final list = m['bank_accounts'] as List<dynamic>? ?? m['bankAccounts'] as List<dynamic>? ?? [];
     return SimSettings(
       sim1: SimConfig.fromJson(m['sim1'] ?? {}),
       sim2: SimConfig.fromJson(m['sim2'] ?? {}),
+      bankAccounts: list
+          .map((e) => CheckoutNumberSlot.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList(),
     );
   }
 
   Map<String, dynamic> toJson() => {
     'sim1': sim1.toJson(),
     'sim2': sim2.toJson(),
+    'bank_accounts': bankAccounts.map((e) => e.toJson()).toList(),
   };
 
   /// Build from the flat device row (allowed/blocked keyword strings)
@@ -75,6 +87,7 @@ class SimSettings {
     return SimSettings(
       sim1: SimConfig(isEnabled: smsFilterEnabled, filters: allowed),
       sim2: SimConfig(isEnabled: smsFilterEnabled, filters: blocked),
+      bankAccounts: const [],
     );
   }
 }

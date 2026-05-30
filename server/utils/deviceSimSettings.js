@@ -52,6 +52,7 @@ function parseSimSettingsRow(row) {
     return {
       sim1: { active: true, allowed_senders: [] },
       sim2: { active: true, allowed_senders: [] },
+      bank_accounts: [],
     };
   }
   const raw = row.sim_settings;
@@ -63,13 +64,18 @@ function parseSimSettingsRow(row) {
         return {
           sim1: normalizeSimSlot(obj.sim1, smsOn),
           sim2: normalizeSimSlot(obj.sim2, smsOn),
+          bank_accounts: obj.bank_accounts || obj.bankAccounts || [],
         };
       }
     } catch {
       /* fall through to legacy */
     }
   }
-  return legacyFromRow(row);
+  const leg = legacyFromRow(row);
+  return {
+    ...leg,
+    bank_accounts: [],
+  };
 }
 
 function simSettingsToApi(parsed) {
@@ -83,6 +89,7 @@ function simSettingsToApi(parsed) {
   return {
     sim1: slot("sim1"),
     sim2: slot("sim2"),
+    bank_accounts: p.bank_accounts || [],
   };
 }
 
@@ -102,6 +109,10 @@ function bodyToSimSettings(body) {
     : Array.isArray(sim2.filters)
       ? sim2.filters
       : [];
+  const sim1Number = body?.sim1_number || body?.sim1Number || null;
+  const sim2Number = body?.sim2_number || body?.sim2Number || null;
+  const bankAccounts = body?.bank_accounts || body?.bankAccounts || [];
+
   const parsed = {
     sim1: {
       active: sim1On,
@@ -111,6 +122,7 @@ function bodyToSimSettings(body) {
       active: sim2On,
       allowed_senders: f2.map((x) => String(x).trim()).filter(Boolean),
     },
+    bank_accounts: bankAccounts,
   };
   return {
     parsed,
@@ -118,6 +130,8 @@ function bodyToSimSettings(body) {
     smsFilterEnabled: sim1On || sim2On ? 1 : 0,
     allowedKeywords: parsed.sim1.allowed_senders.join(","),
     blockedKeywords: parsed.sim2.allowed_senders.join(","),
+    sim1Number,
+    sim2Number,
   };
 }
 
