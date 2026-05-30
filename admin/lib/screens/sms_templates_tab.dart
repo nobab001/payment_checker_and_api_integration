@@ -201,23 +201,28 @@ class _SmsTemplatesTabState extends State<SmsTemplatesTab> {
                         Padding(
                           padding: const EdgeInsets.only(bottom: 8.0),
                           child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Expanded(
                                 child: _DialogField(
                                   controller: conditionCtrls[i],
                                   label: 'কন্ডিশন ${i + 1} (SMS-এর ভেতরের টেক্সট)',
                                   hint: 'You have received cash in [amount] from [phone]',
+                                  maxLines: 4,
                                 ),
                               ),
                               if (conditionCtrls.length > 1)
-                                IconButton(
-                                  icon: const Icon(Icons.remove_circle, color: Colors.redAccent),
-                                  onPressed: () {
-                                    setDialogState(() {
-                                      final ctrl = conditionCtrls.removeAt(i);
-                                      ctrl.dispose();
-                                    });
-                                  },
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 8.0),
+                                  child: IconButton(
+                                    icon: const Icon(Icons.remove_circle, color: Colors.redAccent),
+                                    onPressed: () {
+                                      setDialogState(() {
+                                        final ctrl = conditionCtrls.removeAt(i);
+                                        ctrl.dispose();
+                                      });
+                                    },
+                                  ),
                                 ),
                             ],
                           ),
@@ -448,17 +453,20 @@ class _DialogField extends StatelessWidget {
   final TextEditingController controller;
   final String label;
   final String? hint;
+  final int maxLines;
 
   const _DialogField({
     required this.controller,
     required this.label,
     this.hint,
+    this.maxLines = 1,
   });
 
   @override
   Widget build(BuildContext context) {
     return TextField(
       controller: controller,
+      maxLines: maxLines,
       style: const TextStyle(color: Colors.white, fontSize: 14),
       decoration: InputDecoration(
         labelText: label,
