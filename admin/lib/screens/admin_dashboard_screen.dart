@@ -5,6 +5,7 @@ import '../models/payment_settings.dart';
 import '../models/sms_gateway.dart';
 import '../providers/auth_provider.dart';
 import '../providers/config_provider.dart';
+import 'sms_templates_tab.dart';
 import 'user_management_screen.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
@@ -66,6 +67,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 const UserManagementScreen(),
                 _PaymentSettingsTab(cfg: cfg),
                 _SmsGatewaysTab(cfg: cfg),
+                const SmsTemplatesTab(),
               ],
             ),
           ),
@@ -89,6 +91,7 @@ class _TabBar extends StatelessWidget {
     'Users',
     'Payment',
     'SMS',
+    'Templates',
   ];
   static const _icons = [
     Icons.tune,
@@ -97,6 +100,7 @@ class _TabBar extends StatelessWidget {
     Icons.people,
     Icons.payments_outlined,
     Icons.sms,
+    Icons.description_outlined,
   ];
 
   @override
