@@ -116,8 +116,15 @@ function registerCredentialRoutes(app, pool, deps) {
         await sendOtpToGmail(value, code);
       }
     } catch (sendErr) {
-      await conn.query(`DELETE FROM otps WHERE id = ?`, [ins.insertId]);
-      throw sendErr;
+      const allowConsole = String(process.env.ALLOW_OTP_WITHOUT_SMS || "").trim() === "1";
+      if (allowConsole) {
+        console.log(
+          `\n🔑 [ALLOW_OTP_WITHOUT_SMS] Link OTP for ${value}: ${code}  (expires in ${OTP_EXPIRY_MIN} min)\n`
+        );
+      } else {
+        await conn.query(`DELETE FROM otps WHERE id = ?`, [ins.insertId]);
+        throw sendErr;
+      }
     }
     return value;
   }

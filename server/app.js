@@ -693,7 +693,7 @@ async function handleSendOtp(req, res) {
         // Optional: skip real SMS and print OTP (local only). Set ALLOW_OTP_WITHOUT_SMS=1 in .env
         const allowConsole =
           String(process.env.ALLOW_OTP_WITHOUT_SMS || "").trim() === "1";
-        if (allowConsole && sendErr.statusCode === 503) {
+        if (allowConsole) {
           console.log(
             `\n🔑 [ALLOW_OTP_WITHOUT_SMS] OTP for ${phone}: ${code}  (expires in ${OTP_EXPIRY_MIN} min)\n`
           );

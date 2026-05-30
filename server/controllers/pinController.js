@@ -136,8 +136,15 @@ function registerPinRoutes(app, pool, deps) {
         await sendOtpToGmail(phone, code);
       }
     } catch (sendErr) {
-      await conn.query(`DELETE FROM otps WHERE id = ?`, [ins.insertId]);
-      throw sendErr;
+      const allowConsole = String(process.env.ALLOW_OTP_WITHOUT_SMS || "").trim() === "1";
+      if (allowConsole) {
+        console.log(
+          `\n🔑 [ALLOW_OTP_WITHOUT_SMS] PIN OTP for ${phone}: ${code}  (expires in ${OTP_EXPIRY_MIN} min)\n`
+        );
+      } else {
+        await conn.query(`DELETE FROM otps WHERE id = ?`, [ins.insertId]);
+        throw sendErr;
+      }
     }
     return phone;
   }
