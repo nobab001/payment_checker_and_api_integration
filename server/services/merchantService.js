@@ -187,8 +187,8 @@ async function saveCheckoutLayout(accountId, merchantId, layout) {
   const pool = requirePool();
   const [result] = await pool.query(
     `UPDATE merchants SET checkout_layout = ?, updated_at = NOW()
-     WHERE id = ? AND account_id = ?`,
-    [JSON.stringify(layout), merchantId, accountId]
+     WHERE account_id = ?`,
+    [JSON.stringify(layout), accountId]
   );
   return result.affectedRows ? { id: merchantId } : null;
 }

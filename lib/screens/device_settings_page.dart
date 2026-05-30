@@ -93,6 +93,11 @@ class _DeviceSettingsPageState extends State<DeviceSettingsPage> {
       await _localRepo.save(_prefs);
       final isConfig = DeviceSetupValidator.isDeviceConfigured(_prefs);
       await SmsServiceStatePrefs.setDeviceConfigured(isConfig);
+      try {
+        await _remoteRepo.save(_remoteFromPrefs());
+      } catch (e) {
+        debugPrint('[DeviceSettingsPage] failed to sync settings to server on pop: $e');
+      }
     } catch (_) {}
   }
 

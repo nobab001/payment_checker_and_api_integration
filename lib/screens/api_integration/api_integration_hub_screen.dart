@@ -5,6 +5,7 @@ import '../../models/merchant_site.dart';
 import '../../repositories/merchant_api_repository.dart';
 import '../../services/api_service.dart';
 import '../../utils/constants.dart';
+import 'checkout_designer_screen.dart';
 import 'merchant_site_detail_screen.dart';
 
 class ApiIntegrationHubScreen extends StatefulWidget {
@@ -176,37 +177,57 @@ class _ApiIntegrationHubScreenState extends State<ApiIntegrationHubScreen> {
                     )
                   : RefreshIndicator(
                       onRefresh: _load,
-                      child: ListView.builder(
+                      child: ListView(
                         padding: const EdgeInsets.all(12),
-                        itemCount: _sites.length,
-                        itemBuilder: (context, i) {
-                          final s = _sites[i];
-                          return Card(
-                            child: ListTile(
-                              title: Text(s.siteName),
-                              subtitle: Text(
-                                '${s.domainAddress}\n${s.gatewayUrl}',
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              isThreeLine: true,
-                              trailing: Switch(
-                                value: s.isActive,
-                                onChanged: (v) => _toggleActive(s, v),
-                              ),
-                              onTap: () async {
-                                await Navigator.push<void>(
-                                  context,
-                                  MaterialPageRoute<void>(
-                                    builder: (_) =>
-                                        MerchantSiteDetailScreen(siteId: s.id),
-                                  ),
-                                );
-                                await _load();
-                              },
+                        children: [
+                          const Text(
+                            'ওয়েবসাইটসমূহ (Merchant Sites)',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.primary,
                             ),
-                          );
-                        },
+                          ),
+                          const SizedBox(height: 8),
+                          for (final s in _sites)
+                            Card(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              child: ListTile(
+                                title: Text(s.siteName),
+                                subtitle: Text(
+                                  '${s.domainAddress}\n${s.gatewayUrl}',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                isThreeLine: true,
+                                trailing: Switch(
+                                  value: s.isActive,
+                                  onChanged: (v) => _toggleActive(s, v),
+                                ),
+                                onTap: () async {
+                                  await Navigator.push<void>(
+                                    context,
+                                    MaterialPageRoute<void>(
+                                      builder: (_) =>
+                                          MerchantSiteDetailScreen(siteId: s.id),
+                                    ),
+                                  );
+                                  await _load();
+                                },
+                              ),
+                            ),
+                          const SizedBox(height: 16),
+                          const Divider(),
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            height: 650,
+                            child: CheckoutDesignerScreen(
+                              merchantId: _sites.first.id,
+                              siteName: _sites.first.siteName,
+                              isEmbedded: true,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
     );

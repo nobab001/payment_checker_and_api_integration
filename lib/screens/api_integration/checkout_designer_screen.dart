@@ -11,11 +11,13 @@ import '../../utils/constants.dart';
 class CheckoutDesignerScreen extends StatefulWidget {
   final int merchantId;
   final String siteName;
+  final bool isEmbedded;
 
   const CheckoutDesignerScreen({
     super.key,
     required this.merchantId,
     required this.siteName,
+    this.isEmbedded = false,
   });
 
   @override
@@ -300,6 +302,86 @@ class _CheckoutDesignerScreenState extends State<CheckoutDesignerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.isEmbedded) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+            child: Row(
+              children: [
+                const Icon(Icons.palette_outlined, color: AppColors.primary),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'গেটওয়ে ভিউ কাস্টমাইজার (সকল সাইটে প্রযোজ্য)',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                if (!_loading)
+                  ElevatedButton.icon(
+                    onPressed: _saving ? null : _save,
+                    icon: _saving
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Icon(Icons.save, size: 16),
+                    label: Text(_saving ? 'সেভ হচ্ছে...' : 'সেভ করুন'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const Divider(),
+          if (_loading)
+            const Expanded(
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else ...[
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Center(
+                child: SegmentedButton<bool>(
+                  segments: const [
+                    ButtonSegment(value: false, label: Text('Edit Mode')),
+                    ButtonSegment(value: true, label: Text('Customer Preview')),
+                  ],
+                  selected: {_previewMode},
+                  onSelectionChanged: (s) {
+                    setState(() => _previewMode = s.first);
+                  },
+                ),
+              ),
+            ),
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(8),
+                  color: Colors.white,
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: _previewMode ? _buildCustomerPreview() : _buildEditMode(),
+                ),
+              ),
+            ),
+          ],
+        ],
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: Text('Checkout — ${widget.siteName}'),
