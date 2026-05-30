@@ -7,9 +7,10 @@ import '../models/payment_sms_ingest_payload.dart';
 /// Offline queue for payment ingest when network/auth fails (background-safe).
 class PaymentIngestQueueService {
   PaymentIngestQueueService._();
-  static final PaymentIngestQueueService instance = PaymentIngestQueueService._();
+  static final PaymentIngestQueueService instance =
+      PaymentIngestQueueService._();
 
-  static const _key = 'payment_ingest_pending_v1';
+  static const _key = 'pcu_payment_ingest_pending_v1';
   static const _maxItems = 200;
 
   Future<void> enqueue(PaymentSmsIngestPayload payload) async {

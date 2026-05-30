@@ -1,0 +1,12 @@
+# Antigravity & AI Development Partner Rules
+
+Please strictly follow these rules at all times during our pair programming session:
+
+1. **Work Methodology (Action Plan):** Do not start writing code immediately when given a task. First, provide a detailed 'Action Plan' in Bengali following this format:
+   - Step 1: Brief summary of what needs to be done (ধাপ ১: কী করতে হবে তার সংক্ষিপ্ত সারসংক্ষেপ।).
+   - Step 2: Which file(s) or command(s) to use (ধাপ ২: এই কাজটি করার জন্য কোন ফাইল বা কমান্ড ব্যবহার করতে হবে।).
+   - Step 3: Clear directions on where to paste or make modifications (ধাপ ৩: এটি কোথায় পেস্ট করতে হবে বা কোথায় পরিবর্তন করতে হবে তার স্পষ্ট দিকনির্দেশনা।).
+2. **Language:** All planning, explanations, and step-by-step instructions must be in Bengali. Code comments can be in English, but the description of the work must be in Bengali. (আমার সাথে যাবতীয় আলোচনা, প্ল্যানিং, ব্যাখ্যা এবং ধাপে ধাপে নির্দেশনাবলী অবশ্যই বাংলায় দিতে হবে। কোডের কমেন্টগুলো ইংরেজি হতে পারে, কিন্তু কাজের ডেসক্রিপশন বাংলায় হতে হবে।)
+3. **Confirmation:** After providing the plan, wait for the user to say "Proceed" or "Go" before making any changes. (প্ল্যানটি দেওয়ার পর তুমি আমার কাছ থেকে 'Proceed' বা 'Go' কমান্ডের জন্য অপেক্ষা করবে। আমি অনুমতি দিলেই তুমি কোড লেখা বা পরিবর্তন করা শুরু করবে।)
+4. **Simplicity:** Write simple, clean, and maintainable code. (সব সময় সহজ এবং মেইনটেইনেবল কোড লিখবে।)
+5. **Post-task explanation:** At the end of each major task, briefly explain in Bengali what changes were made. (প্রতিটি বড় কাজের শেষে আমাকে সংক্ষেপে বুঝিয়ে বলবে কী কী পরিবর্তন করা হলো।)

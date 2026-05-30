@@ -32,8 +32,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF0D1B2A),
         elevation: 0,
-        title: const Text('Admin Dashboard',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: const Text(
+          'Admin Dashboard',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
         actions: [
           if (cfg.saving)
             const Padding(
@@ -43,7 +45,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   width: 18,
                   height: 18,
                   child: CircularProgressIndicator(
-                      color: Color(0xFF4FC3F7), strokeWidth: 2),
+                    color: Color(0xFF4FC3F7),
+                    strokeWidth: 2,
+                  ),
                 ),
               ),
             ),
@@ -66,7 +70,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 _SocialLinksTab(cfg: cfg),
                 const UserManagementScreen(),
                 _PaymentSettingsTab(cfg: cfg),
-                _SmsGatewaysTab(cfg: cfg),
                 const SmsTemplatesTab(),
               ],
             ),
@@ -90,7 +93,6 @@ class _TabBar extends StatelessWidget {
     'Social',
     'Users',
     'Payment',
-    'SMS',
     'Templates',
   ];
   static const _icons = [
@@ -99,7 +101,6 @@ class _TabBar extends StatelessWidget {
     Icons.share,
     Icons.people,
     Icons.payments_outlined,
-    Icons.sms,
     Icons.description_outlined,
   ];
 
@@ -128,22 +129,24 @@ class _TabBar extends StatelessWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(_icons[i],
-                        size: 20,
+                    Icon(
+                      _icons[i],
+                      size: 20,
+                      color: active ? const Color(0xFF4FC3F7) : Colors.white38,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _labels[i],
+                      style: TextStyle(
+                        fontSize: 11,
                         color: active
                             ? const Color(0xFF4FC3F7)
-                            : Colors.white38),
-                    const SizedBox(height: 4),
-                    Text(_labels[i],
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: active
-                              ? const Color(0xFF4FC3F7)
-                              : Colors.white38,
-                          fontWeight: active
-                              ? FontWeight.bold
-                              : FontWeight.normal,
-                        )),
+                            : Colors.white38,
+                        fontWeight: active
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -173,8 +176,7 @@ class _GlobalConfigTab extends StatelessWidget {
           title: 'App Enabled',
           subtitle: 'Master switch — disables entire app for all users',
           value: g.appEnabled,
-          onChanged: (v) =>
-              cfg.saveGlobal(g.copyWith(appEnabled: v)),
+          onChanged: (v) => cfg.saveGlobal(g.copyWith(appEnabled: v)),
           color: const Color(0xFF4FC3F7),
         ),
         _ToggleTile(
@@ -189,16 +191,14 @@ class _GlobalConfigTab extends StatelessWidget {
           title: 'SMS API',
           subtitle: 'Enable SMS-based payment tracking',
           value: g.smsApiEnabled,
-          onChanged: (v) =>
-              cfg.saveGlobal(g.copyWith(smsApiEnabled: v)),
+          onChanged: (v) => cfg.saveGlobal(g.copyWith(smsApiEnabled: v)),
           color: const Color(0xFFFFB74D),
         ),
         _ToggleTile(
           title: 'Gmail API',
           subtitle: 'Enable Gmail-based payment tracking',
           value: g.gmailApiEnabled,
-          onChanged: (v) =>
-              cfg.saveGlobal(g.copyWith(gmailApiEnabled: v)),
+          onChanged: (v) => cfg.saveGlobal(g.copyWith(gmailApiEnabled: v)),
           color: const Color(0xFFE57373),
         ),
       ],
@@ -208,188 +208,74 @@ class _GlobalConfigTab extends StatelessWidget {
 
 // ── API Keys tab ─────────────────────────────────────────────────────────────
 
-class _ApiKeysTab extends StatefulWidget {
+class _ApiKeysTab extends StatelessWidget {
   final ConfigProvider cfg;
   const _ApiKeysTab({required this.cfg});
-
-  @override
-  State<_ApiKeysTab> createState() => _ApiKeysTabState();
-}
-
-class _ApiKeysTabState extends State<_ApiKeysTab> {
-  late final TextEditingController _smsKey;
-  late final TextEditingController _smsEndpoint;
-  late final TextEditingController _gmailKey;
-  late final TextEditingController _gmailEndpoint;
-
-  @override
-  void initState() {
-    super.initState();
-    final k = widget.cfg.apiKeys;
-    _smsKey = TextEditingController(text: k.smsApiKey);
-    _smsEndpoint = TextEditingController(text: k.smsApiEndpoint);
-    _gmailKey = TextEditingController(text: k.gmailApiKey);
-    _gmailEndpoint = TextEditingController(text: k.gmailApiEndpoint);
-  }
-
-  @override
-  void dispose() {
-    _smsKey.dispose();
-    _smsEndpoint.dispose();
-    _gmailKey.dispose();
-    _gmailEndpoint.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    final ok = await widget.cfg.saveApiKeys(ApiKeys(
-      smsApiKey: _smsKey.text.trim(),
-      smsApiEndpoint: _smsEndpoint.text.trim(),
-      gmailApiKey: _gmailKey.text.trim(),
-      gmailApiEndpoint: _gmailEndpoint.text.trim(),
-    ));
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(ok ? 'API keys saved' : 'Save failed: ${widget.cfg.saveError}'),
-      backgroundColor: ok ? const Color(0xFF388E3C) : Colors.red[700],
-    ));
-  }
 
   @override
   Widget build(BuildContext context) {
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        _SectionHeader(title: 'SMS API', icon: Icons.sms),
-        const SizedBox(height: 12),
-        _DarkField(controller: _smsKey, label: 'SMS API Key', obscure: true),
-        const SizedBox(height: 12),
-        _DarkField(
-            controller: _smsEndpoint,
-            label: 'SMS API Endpoint',
-            hint: 'https://api.example.com/sms'),
-        const SizedBox(height: 24),
-        _SectionHeader(title: 'Gmail API', icon: Icons.email_outlined),
-        const SizedBox(height: 12),
-        _DarkField(
-            controller: _gmailKey, label: 'Gmail API Key', obscure: true),
-        const SizedBox(height: 12),
-        _DarkField(
-            controller: _gmailEndpoint,
-            label: 'Gmail API Endpoint',
-            hint: 'https://api.example.com/gmail'),
-        const SizedBox(height: 28),
-        ElevatedButton.icon(
-          onPressed: widget.cfg.saving ? null : _save,
-          icon: const Icon(Icons.save),
-          label: const Text('Save API Keys'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF4FC3F7),
-            foregroundColor: const Color(0xFF0D1B2A),
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-        ),
+        _SmsProvidersSection(cfg: cfg),
         const SizedBox(height: 32),
         Divider(color: Colors.white12),
         const SizedBox(height: 24),
-        _EmailConfigSection(cfg: widget.cfg),
+        _EmailAccountsSection(cfg: cfg),
       ],
     );
   }
 }
 
-// ── Email Config section (inside API Keys tab) ───────────────────────────────
+// ── Email Accounts section (inside API Keys tab) ─────────────────────────────
 
-class _EmailConfigSection extends StatefulWidget {
+class _EmailAccountsSection extends StatelessWidget {
   final ConfigProvider cfg;
-  const _EmailConfigSection({required this.cfg});
-
-  @override
-  State<_EmailConfigSection> createState() => _EmailConfigSectionState();
-}
-
-class _EmailConfigSectionState extends State<_EmailConfigSection> {
-  late final TextEditingController _gmailAddr;
-  late final TextEditingController _appPass;
-  bool _obscurePass = true;
-
-  @override
-  void initState() {
-    super.initState();
-    final e = widget.cfg.emailConfig;
-    _gmailAddr = TextEditingController(text: e.gmailAddress);
-    _appPass = TextEditingController(text: e.appPassword);
-  }
-
-  @override
-  void dispose() {
-    _gmailAddr.dispose();
-    _appPass.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    final addr = _gmailAddr.text.trim();
-    final pass = _appPass.text;
-    if (addr.isEmpty || !addr.contains('@gmail.com')) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Valid @gmail.com address required'),
-            backgroundColor: Colors.red),
-      );
-      return;
-    }
-    if (pass.length < 8) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('App Password must be at least 8 characters'),
-            backgroundColor: Colors.red),
-      );
-      return;
-    }
-    final ok = await widget.cfg.saveEmailConfig(
-        EmailConfig(gmailAddress: addr, appPassword: pass));
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(ok ? 'OTP email credentials saved' : 'Save failed: ${widget.cfg.saveError}'),
-      backgroundColor: ok ? const Color(0xFF388E3C) : Colors.red[700],
-    ));
-  }
+  const _EmailAccountsSection({required this.cfg});
 
   @override
   Widget build(BuildContext context) {
-    final configured = widget.cfg.emailConfig.isConfigured;
+    final accounts = cfg.emailAccounts;
+    final hasActive = accounts.any((a) => a.isActive);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           children: [
-            _SectionHeader(title: 'OTP Email (Gmail SMTP)', icon: Icons.mark_email_read_outlined),
+            _SectionHeader(
+              title: 'OTP Email (Gmail SMTP)',
+              icon: Icons.mark_email_read_outlined,
+            ),
             const Spacer(),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: configured
+                color: hasActive
                     ? const Color(0xFF81C784).withAlpha(30)
                     : Colors.red.withAlpha(30),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
-                    color: configured
-                        ? const Color(0xFF81C784)
-                        : Colors.red.shade300),
-              ),
-              child: Text(
-                configured ? 'CONFIGURED' : 'NOT SET',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  color: configured
+                  color: hasActive
                       ? const Color(0xFF81C784)
                       : Colors.red.shade300,
                 ),
               ),
+              child: Text(
+                hasActive ? 'CONFIGURED' : 'NOT SET',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: hasActive
+                      ? const Color(0xFF81C784)
+                      : Colors.red.shade300,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton(
+              icon: const Icon(Icons.add_circle, color: Color(0xFF4FC3F7)),
+              tooltip: 'Add Gmail account',
+              onPressed: () => _showEmailAccountDialog(context, cfg, null),
             ),
           ],
         ),
@@ -402,65 +288,297 @@ class _EmailConfigSectionState extends State<_EmailConfigSection> {
             border: Border.all(color: const Color(0xFFFFB74D).withAlpha(60)),
           ),
           child: const Text(
-            'Use a Gmail App Password (not your account password).\n'
-            'Generate at: myaccount.google.com → Security → 2-Step Verification → App Passwords',
+            'Round-robin: first account sends 500 OTPs, then switches to the next.\n'
+            'Use a Gmail App Password (not your account password).',
             style: TextStyle(color: Color(0xFFFFB74D), fontSize: 11),
           ),
         ),
-        const SizedBox(height: 14),
-        _DarkField(
-          controller: _gmailAddr,
-          label: 'Gmail Address',
-          hint: 'yourname@gmail.com',
-          prefix: const Icon(Icons.email_outlined, color: Colors.white38, size: 20),
-        ),
         const SizedBox(height: 12),
-        TextField(
-          controller: _appPass,
-          obscureText: _obscurePass,
-          style: const TextStyle(color: Colors.white),
-          decoration: InputDecoration(
-            labelText: 'App Password',
-            hintText: 'xxxx xxxx xxxx xxxx',
-            labelStyle: const TextStyle(color: Colors.white54),
-            hintStyle: const TextStyle(color: Colors.white24),
-            prefixIcon: const Icon(Icons.vpn_key_outlined,
-                color: Colors.white38, size: 20),
-            suffixIcon: IconButton(
-              icon: Icon(
-                  _obscurePass ? Icons.visibility_off : Icons.visibility,
-                  color: Colors.white38,
-                  size: 20),
-              onPressed: () => setState(() => _obscurePass = !_obscurePass),
+        if (accounts.isEmpty)
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 40),
+            alignment: Alignment.center,
+            child: const Text(
+              'No Gmail accounts configured',
+              style: TextStyle(color: Colors.white38, fontSize: 13),
             ),
-            filled: true,
-            fillColor: const Color(0xFF1A2E42),
-            border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide.none),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide:
-                  const BorderSide(color: Color(0xFF4FC3F7), width: 2),
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        ElevatedButton.icon(
-          onPressed: widget.cfg.saving ? null : _save,
-          icon: const Icon(Icons.save),
-          label: const Text('Save Email Credentials'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF81C784),
-            foregroundColor: const Color(0xFF0D1B2A),
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10)),
-          ),
-        ),
+          )
+        else
+          ...accounts.map((a) => _EmailAccountCard(account: a, cfg: cfg)),
       ],
     );
   }
+}
+
+class _EmailAccountCard extends StatelessWidget {
+  final EmailAccount account;
+  final ConfigProvider cfg;
+  const _EmailAccountCard({required this.account, required this.cfg});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A2E42),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: account.isActive
+              ? const Color(0xFF81C784).withAlpha(80)
+              : Colors.transparent,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  account.email,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+              if (account.isActive)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF81C784).withAlpha(30),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: const Color(0xFF81C784)),
+                  ),
+                  child: const Text(
+                    'ACTIVE',
+                    style: TextStyle(
+                      color: Color(0xFF81C784),
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Limit: ${account.dailyLimit}  |  Sent: ${account.sentCount}',
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Switch(
+                value: account.isActive,
+                onChanged: cfg.saving
+                    ? null
+                    : (v) => v
+                          ? cfg.activateEmailAccount(account.id)
+                          : cfg.deactivateEmailAccount(account.id),
+                activeThumbColor: const Color(0xFF81C784),
+                inactiveThumbColor: Colors.white38,
+                inactiveTrackColor: Colors.white12,
+              ),
+              const Spacer(),
+              IconButton(
+                icon: const Icon(
+                  Icons.edit_outlined,
+                  color: Color(0xFF4FC3F7),
+                  size: 20,
+                ),
+                tooltip: 'Edit',
+                onPressed: () => _showEmailAccountDialog(context, cfg, account),
+              ),
+              IconButton(
+                icon: Icon(
+                  Icons.delete_outline,
+                  color: Colors.red.shade300,
+                  size: 20,
+                ),
+                tooltip: 'Delete',
+                onPressed: () => _confirmDeleteEmail(context, cfg, account),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmDeleteEmail(
+    BuildContext context,
+    ConfigProvider cfg,
+    EmailAccount account,
+  ) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF1A2E42),
+        title: const Text(
+          'Delete Account',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          'Delete "${account.email}"? This cannot be undone.',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: Colors.white54),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () {
+              Navigator.pop(context);
+              cfg.deleteEmailAccount(account.id);
+            },
+            child: const Text('Delete', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+void _showEmailAccountDialog(
+  BuildContext context,
+  ConfigProvider cfg,
+  EmailAccount? existing,
+) {
+  final isEdit = existing != null;
+  final emailCtrl = TextEditingController(text: existing?.email ?? '');
+  final passCtrl = TextEditingController(text: existing?.appPassword ?? '');
+  final limitCtrl = TextEditingController(
+    text: (existing?.dailyLimit ?? 500).toString(),
+  );
+  bool obscurePass = true;
+
+  showDialog(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setState) => AlertDialog(
+        backgroundColor: const Color(0xFF1A2E42),
+        title: Text(
+          isEdit ? 'Edit Gmail Account' : 'Add Gmail Account',
+          style: const TextStyle(color: Colors.white),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _DialogField(
+                controller: emailCtrl,
+                label: 'Gmail Address',
+                hint: 'yourname@gmail.com',
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: passCtrl,
+                obscureText: obscurePass,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: 'App Password',
+                  hintText: 'xxxx xxxx xxxx xxxx',
+                  labelStyle: const TextStyle(color: Colors.white54),
+                  hintStyle: const TextStyle(color: Colors.white24),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      obscurePass ? Icons.visibility_off : Icons.visibility,
+                      color: Colors.white38,
+                      size: 20,
+                    ),
+                    onPressed: () => setState(() => obscurePass = !obscurePass),
+                  ),
+                  filled: true,
+                  fillColor: const Color(0xFF0D1B2A),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide.none,
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(
+                      color: Color(0xFF4FC3F7),
+                      width: 2,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              _DialogField(
+                controller: limitCtrl,
+                label: 'Daily Limit',
+                hint: '500',
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: Colors.white54),
+            ),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF4FC3F7),
+              foregroundColor: const Color(0xFF0D1B2A),
+            ),
+            icon: const Icon(Icons.save, size: 18),
+            label: Text(isEdit ? 'Update' : 'Add'),
+            onPressed: () {
+              final email = emailCtrl.text.trim();
+              final pass = passCtrl.text.trim();
+              final limit = int.tryParse(limitCtrl.text.trim()) ?? 500;
+              if (email.isEmpty || !email.contains('@')) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(
+                    content: Text('Valid email address required'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+                return;
+              }
+              if (pass.length < 8) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(
+                    content: Text('App Password must be at least 8 characters'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+                return;
+              }
+              final a = EmailAccount(
+                id: existing?.id ?? '',
+                email: email,
+                appPassword: pass,
+                dailyLimit: limit,
+                isActive: existing?.isActive ?? false,
+              );
+              if (isEdit) {
+                cfg.updateEmailAccount(a);
+              } else {
+                cfg.addEmailAccount(a);
+              }
+              Navigator.pop(ctx);
+            },
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 // ── Social Links tab ─────────────────────────────────────────────────────────
@@ -479,6 +597,13 @@ class _SocialLinksTabState extends State<_SocialLinksTab> {
   late final TextEditingController _telegram;
   late final TextEditingController _youtube;
 
+  /// true once the user has typed in (or cleared) a field — stops server
+  /// polling from overwriting local edits.
+  bool _whatsappDirty = false;
+  bool _facebookDirty = false;
+  bool _telegramDirty = false;
+  bool _youtubeDirty = false;
+
   @override
   void initState() {
     super.initState();
@@ -487,10 +612,12 @@ class _SocialLinksTabState extends State<_SocialLinksTab> {
     _facebook = TextEditingController(text: s.facebook);
     _telegram = TextEditingController(text: s.telegram);
     _youtube = TextEditingController(text: s.youtube);
+    widget.cfg.addListener(_onConfigChanged);
   }
 
   @override
   void dispose() {
+    widget.cfg.removeListener(_onConfigChanged);
     _whatsapp.dispose();
     _facebook.dispose();
     _telegram.dispose();
@@ -498,18 +625,40 @@ class _SocialLinksTabState extends State<_SocialLinksTab> {
     super.dispose();
   }
 
-  Future<void> _save() async {
-    final ok = await widget.cfg.saveSocialLinks(SocialLinks(
-      whatsapp: _whatsapp.text.trim(),
-      facebook: _facebook.text.trim(),
-      telegram: _telegram.text.trim(),
-      youtube: _youtube.text.trim(),
-    ));
+  /// Fill fields from the server only when the user hasn't touched them yet.
+  void _onConfigChanged() {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(ok ? 'Social links saved' : 'Save failed: ${widget.cfg.saveError}'),
-      backgroundColor: ok ? const Color(0xFF388E3C) : Colors.red[700],
-    ));
+    final s = widget.cfg.socialLinks;
+    if (!_whatsappDirty && s.whatsapp.isNotEmpty) _whatsapp.text = s.whatsapp;
+    if (!_facebookDirty && s.facebook.isNotEmpty) _facebook.text = s.facebook;
+    if (!_telegramDirty && s.telegram.isNotEmpty) _telegram.text = s.telegram;
+    if (!_youtubeDirty && s.youtube.isNotEmpty) _youtube.text = s.youtube;
+  }
+
+  Future<void> _save() async {
+    final ok = await widget.cfg.saveSocialLinks(
+      SocialLinks(
+        whatsapp: _whatsapp.text.trim(),
+        facebook: _facebook.text.trim(),
+        telegram: _telegram.text.trim(),
+        youtube: _youtube.text.trim(),
+      ),
+    );
+    if (ok) {
+      _whatsappDirty = false;
+      _facebookDirty = false;
+      _telegramDirty = false;
+      _youtubeDirty = false;
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok ? 'Social links saved' : 'Save failed: ${widget.cfg.saveError}',
+        ),
+        backgroundColor: ok ? const Color(0xFF388E3C) : Colors.red[700],
+      ),
+    );
   }
 
   @override
@@ -524,14 +673,19 @@ class _SocialLinksTabState extends State<_SocialLinksTab> {
           label: 'WhatsApp',
           hint: 'https://wa.me/880XXXXXXXXXX',
           prefix: const Icon(Icons.chat, color: Color(0xFF25D366), size: 20),
+          onChanged: (_) => _whatsappDirty = true,
         ),
         const SizedBox(height: 12),
         _DarkField(
           controller: _facebook,
           label: 'Facebook',
           hint: 'https://facebook.com/YOUR_PAGE',
-          prefix:
-              const Icon(Icons.facebook, color: Color(0xFF1877F2), size: 20),
+          prefix: const Icon(
+            Icons.facebook,
+            color: Color(0xFF1877F2),
+            size: 20,
+          ),
+          onChanged: (_) => _facebookDirty = true,
         ),
         const SizedBox(height: 12),
         _DarkField(
@@ -539,14 +693,19 @@ class _SocialLinksTabState extends State<_SocialLinksTab> {
           label: 'Telegram',
           hint: 'https://t.me/YOUR_CHANNEL',
           prefix: const Icon(Icons.send, color: Color(0xFF229ED9), size: 20),
+          onChanged: (_) => _telegramDirty = true,
         ),
         const SizedBox(height: 12),
         _DarkField(
           controller: _youtube,
           label: 'YouTube',
           hint: 'https://youtube.com/@YOUR_CHANNEL',
-          prefix:
-              const Icon(Icons.play_circle, color: Color(0xFFFF0000), size: 20),
+          prefix: const Icon(
+            Icons.play_circle,
+            color: Color(0xFFFF0000),
+            size: 20,
+          ),
+          onChanged: (_) => _youtubeDirty = true,
         ),
         const SizedBox(height: 28),
         ElevatedButton.icon(
@@ -557,8 +716,9 @@ class _SocialLinksTabState extends State<_SocialLinksTab> {
             backgroundColor: const Color(0xFF4FC3F7),
             foregroundColor: const Color(0xFF0D1B2A),
             padding: const EdgeInsets.symmetric(vertical: 14),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
           ),
         ),
       ],
@@ -607,21 +767,27 @@ class _PaymentSettingsTabState extends State<_PaymentSettingsTab> {
   }
 
   Future<void> _save() async {
-    final ok = await widget.cfg.savePaymentSettings(PaymentSettings(
-      bkashApiKey: _apiKey.text.trim(),
-      bkashSecretKey: _secretKey.text.trim(),
-      bkashAppId: _appId.text.trim(),
-      bkashPassword: _password.text.trim(),
-      testMode: _testMode,
-      bkashCallbackUrl: _callbackUrl.text.trim(),
-    ));
+    final ok = await widget.cfg.savePaymentSettings(
+      PaymentSettings(
+        bkashApiKey: _apiKey.text.trim(),
+        bkashSecretKey: _secretKey.text.trim(),
+        bkashAppId: _appId.text.trim(),
+        bkashPassword: _password.text.trim(),
+        testMode: _testMode,
+        bkashCallbackUrl: _callbackUrl.text.trim(),
+      ),
+    );
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(ok
-          ? 'Payment settings saved'
-          : 'Save failed: ${widget.cfg.saveError}'),
-      backgroundColor: ok ? const Color(0xFF388E3C) : Colors.red[700],
-    ));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? 'Payment settings saved'
+              : 'Save failed: ${widget.cfg.saveError}',
+        ),
+        backgroundColor: ok ? const Color(0xFF388E3C) : Colors.red[700],
+      ),
+    );
   }
 
   @override
@@ -629,7 +795,10 @@ class _PaymentSettingsTabState extends State<_PaymentSettingsTab> {
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        _SectionHeader(title: 'Payment Settings (bKash)', icon: Icons.account_balance),
+        _SectionHeader(
+          title: 'Payment Settings (bKash)',
+          icon: Icons.account_balance,
+        ),
         const SizedBox(height: 8),
         const Text(
           'Credentials are stored in Firestore (config/paymentSettings). '
@@ -649,9 +818,13 @@ class _PaymentSettingsTabState extends State<_PaymentSettingsTab> {
             ),
           ),
           child: SwitchListTile(
-            title: const Text('Test mode',
-                style: TextStyle(
-                    color: Colors.white, fontWeight: FontWeight.w600)),
+            title: const Text(
+              'Test mode',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
             subtitle: Text(
               _testMode
                   ? 'Sandbox / tokenized test endpoints'
@@ -665,11 +838,7 @@ class _PaymentSettingsTabState extends State<_PaymentSettingsTab> {
             inactiveTrackColor: Colors.white12,
           ),
         ),
-        _DarkField(
-          controller: _apiKey,
-          label: 'BKASH_API_KEY',
-          obscure: true,
-        ),
+        _DarkField(controller: _apiKey, label: 'BKASH_API_KEY', obscure: true),
         const SizedBox(height: 12),
         _DarkField(
           controller: _secretKey,
@@ -677,10 +846,7 @@ class _PaymentSettingsTabState extends State<_PaymentSettingsTab> {
           obscure: true,
         ),
         const SizedBox(height: 12),
-        _DarkField(
-          controller: _appId,
-          label: 'BKASH_APP_ID',
-        ),
+        _DarkField(controller: _appId, label: 'BKASH_APP_ID'),
         const SizedBox(height: 12),
         _DarkField(
           controller: _password,
@@ -702,8 +868,9 @@ class _PaymentSettingsTabState extends State<_PaymentSettingsTab> {
             backgroundColor: const Color(0xFF4FC3F7),
             foregroundColor: const Color(0xFF0D1B2A),
             padding: const EdgeInsets.symmetric(vertical: 14),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
           ),
         ),
       ],
@@ -724,13 +891,15 @@ class _SectionHeader extends StatelessWidget {
       children: [
         Icon(icon, color: const Color(0xFF4FC3F7), size: 18),
         const SizedBox(width: 8),
-        Text(title,
-            style: const TextStyle(
-              color: Color(0xFF4FC3F7),
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 0.5,
-            )),
+        Text(
+          title,
+          style: const TextStyle(
+            color: Color(0xFF4FC3F7),
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 0.5,
+          ),
+        ),
       ],
     );
   }
@@ -763,18 +932,23 @@ class _ToggleTile extends StatelessWidget {
         ),
       ),
       child: SwitchListTile(
-        title: Text(title,
-            style: const TextStyle(
-                color: Colors.white, fontWeight: FontWeight.w600)),
-        subtitle: Text(subtitle,
-            style: const TextStyle(color: Colors.white38, fontSize: 12)),
+        title: Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        subtitle: Text(
+          subtitle,
+          style: const TextStyle(color: Colors.white38, fontSize: 12),
+        ),
         value: value,
         onChanged: onChanged,
         activeThumbColor: color,
         inactiveThumbColor: Colors.white38,
         inactiveTrackColor: Colors.white12,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
   }
@@ -786,6 +960,7 @@ class _DarkField extends StatelessWidget {
   final String? hint;
   final bool obscure;
   final Widget? prefix;
+  final ValueChanged<String>? onChanged;
 
   const _DarkField({
     required this.controller,
@@ -793,12 +968,14 @@ class _DarkField extends StatelessWidget {
     this.hint,
     this.obscure = false,
     this.prefix,
+    this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
     return TextField(
       controller: controller,
+      onChanged: onChanged,
       obscureText: obscure,
       style: const TextStyle(color: Colors.white),
       decoration: InputDecoration(
@@ -810,12 +987,12 @@ class _DarkField extends StatelessWidget {
         filled: true,
         fillColor: const Color(0xFF1A2E42),
         border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide.none),
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide.none,
+        ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide:
-              const BorderSide(color: Color(0xFF4FC3F7), width: 2),
+          borderSide: const BorderSide(color: Color(0xFF4FC3F7), width: 2),
         ),
       ),
     );
@@ -824,15 +1001,15 @@ class _DarkField extends StatelessWidget {
 
 // ── SMS Gateways tab ────────────────────────────────────────────────────────
 
-class _SmsGatewaysTab extends StatelessWidget {
+class _SmsProvidersSection extends StatelessWidget {
   final ConfigProvider cfg;
-  const _SmsGatewaysTab({required this.cfg});
+  const _SmsProvidersSection({required this.cfg});
 
   @override
   Widget build(BuildContext context) {
     final gateways = cfg.smsGateways;
-    return ListView(
-      padding: const EdgeInsets.all(20),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           children: [
@@ -887,37 +1064,55 @@ class _GatewayCard extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: Text(gw.name,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15)),
+                child: Text(
+                  gw.name,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
               ),
               if (gw.isActive)
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFF81C784).withAlpha(30),
                     borderRadius: BorderRadius.circular(20),
-                    border:
-                        Border.all(color: const Color(0xFF81C784)),
+                    border: Border.all(color: const Color(0xFF81C784)),
                   ),
-                  child: const Text('ACTIVE',
-                      style: TextStyle(
-                          color: Color(0xFF81C784),
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold)),
+                  child: const Text(
+                    'ACTIVE',
+                    style: TextStyle(
+                      color: Color(0xFF81C784),
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
             ],
           ),
           const SizedBox(height: 6),
-          Text(gw.endpoint.isNotEmpty ? gw.endpoint : '(no endpoint)',
-              style: const TextStyle(color: Colors.white54, fontSize: 12)),
+          Text(
+            gw.endpoint.isNotEmpty ? gw.endpoint : '(no endpoint)',
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          ),
           if (gw.senderId.isNotEmpty) ...[
             const SizedBox(height: 2),
-            Text('Sender: ${gw.senderId}',
-                style: const TextStyle(color: Colors.white38, fontSize: 11)),
+            Text(
+              'Sender: ${gw.senderId}',
+              style: const TextStyle(color: Colors.white38, fontSize: 11),
+            ),
+          ],
+          if (gw.username.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text(
+              'Username: ${gw.username}',
+              style: const TextStyle(color: Colors.white38, fontSize: 11),
+            ),
           ],
           const SizedBox(height: 8),
           Row(
@@ -927,23 +1122,28 @@ class _GatewayCard extends StatelessWidget {
                 onChanged: cfg.saving
                     ? null
                     : (v) => v
-                        ? cfg.activateSmsGateway(gw.id)
-                        : cfg.deactivateSmsGateway(gw.id),
+                          ? cfg.activateSmsGateway(gw.id)
+                          : cfg.deactivateSmsGateway(gw.id),
                 activeThumbColor: const Color(0xFF81C784),
                 inactiveThumbColor: Colors.white38,
                 inactiveTrackColor: Colors.white12,
               ),
               const Spacer(),
               IconButton(
-                icon: const Icon(Icons.edit_outlined,
-                    color: Color(0xFF4FC3F7), size: 20),
+                icon: const Icon(
+                  Icons.edit_outlined,
+                  color: Color(0xFF4FC3F7),
+                  size: 20,
+                ),
                 tooltip: 'Edit',
-                onPressed: () =>
-                    _showGatewayDialog(context, cfg, gw),
+                onPressed: () => _showGatewayDialog(context, cfg, gw),
               ),
               IconButton(
-                icon: Icon(Icons.delete_outline,
-                    color: Colors.red.shade300, size: 20),
+                icon: Icon(
+                  Icons.delete_outline,
+                  color: Colors.red.shade300,
+                  size: 20,
+                ),
                 tooltip: 'Delete',
                 onPressed: () => _confirmDelete(context, cfg, gw),
               ),
@@ -954,21 +1154,26 @@ class _GatewayCard extends StatelessWidget {
     );
   }
 
-  void _confirmDelete(
-      BuildContext context, ConfigProvider cfg, SmsGateway gw) {
+  void _confirmDelete(BuildContext context, ConfigProvider cfg, SmsGateway gw) {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: const Color(0xFF1A2E42),
-        title: const Text('Delete Provider',
-            style: TextStyle(color: Colors.white)),
-        content: Text('Delete "${gw.name}"? This cannot be undone.',
-            style: const TextStyle(color: Colors.white70)),
+        title: const Text(
+          'Delete Provider',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          'Delete "${gw.name}"? This cannot be undone.',
+          style: const TextStyle(color: Colors.white70),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel',
-                style: TextStyle(color: Colors.white54)),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: Colors.white54),
+            ),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
@@ -976,8 +1181,7 @@ class _GatewayCard extends StatelessWidget {
               Navigator.pop(context);
               cfg.deleteSmsGateway(gw.id);
             },
-            child: const Text('Delete',
-                style: TextStyle(color: Colors.white)),
+            child: const Text('Delete', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -986,46 +1190,52 @@ class _GatewayCard extends StatelessWidget {
 }
 
 void _showGatewayDialog(
-    BuildContext context, ConfigProvider cfg, SmsGateway? existing) {
+  BuildContext context,
+  ConfigProvider cfg,
+  SmsGateway? existing,
+) {
   final isEdit = existing != null;
   final nameCtrl = TextEditingController(text: existing?.name ?? '');
   final keyCtrl = TextEditingController(text: existing?.apiKey ?? '');
-  final endpointCtrl =
-      TextEditingController(text: existing?.endpoint ?? '');
-  final senderCtrl =
-      TextEditingController(text: existing?.senderId ?? '');
+  final usernameCtrl = TextEditingController(text: existing?.username ?? '');
+  final endpointCtrl = TextEditingController(text: existing?.endpoint ?? '');
+  final senderCtrl = TextEditingController(text: existing?.senderId ?? '');
 
   showDialog(
     context: context,
     builder: (ctx) => AlertDialog(
       backgroundColor: const Color(0xFF1A2E42),
-      title: Text(isEdit ? 'Edit Provider' : 'Add Provider',
-          style: const TextStyle(color: Colors.white)),
+      title: Text(
+        isEdit ? 'Edit Provider' : 'Add Provider',
+        style: const TextStyle(color: Colors.white),
+      ),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             _DialogField(controller: nameCtrl, label: 'Provider Name'),
             const SizedBox(height: 12),
-            _DialogField(
-                controller: keyCtrl, label: 'API Key', obscure: true),
+            _DialogField(controller: keyCtrl, label: 'API Key', obscure: true),
             const SizedBox(height: 12),
             _DialogField(
-                controller: endpointCtrl,
-                label: 'Endpoint URL',
-                hint: 'https://api.example.com/sms'),
+              controller: usernameCtrl,
+              label: 'Username (optional)',
+            ),
             const SizedBox(height: 12),
             _DialogField(
-                controller: senderCtrl,
-                label: 'Sender ID (optional)'),
+              controller: endpointCtrl,
+              label: 'Endpoint URL',
+              hint: 'https://api.example.com/sms',
+            ),
+            const SizedBox(height: 12),
+            _DialogField(controller: senderCtrl, label: 'Sender ID (optional)'),
           ],
         ),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(ctx),
-          child:
-              const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
         ),
         ElevatedButton.icon(
           style: ElevatedButton.styleFrom(
@@ -1039,16 +1249,19 @@ void _showGatewayDialog(
             final key = keyCtrl.text.trim();
             final endpoint = endpointCtrl.text.trim();
             if (name.isEmpty || key.isEmpty || endpoint.isEmpty) {
-              ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-                content: Text('Name, API Key, and Endpoint are required'),
-                backgroundColor: Colors.red,
-              ));
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                const SnackBar(
+                  content: Text('Name, API Key, and Endpoint are required'),
+                  backgroundColor: Colors.red,
+                ),
+              );
               return;
             }
             final gw = SmsGateway(
               id: existing?.id ?? '',
               name: name,
               apiKey: key,
+              username: usernameCtrl.text.trim(),
               endpoint: endpoint,
               senderId: senderCtrl.text.trim(),
               isActive: existing?.isActive ?? false,
@@ -1093,8 +1306,9 @@ class _DialogField extends StatelessWidget {
         filled: true,
         fillColor: const Color(0xFF0D1B2A),
         border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide.none),
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide.none,
+        ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: const BorderSide(color: Color(0xFF4FC3F7), width: 2),

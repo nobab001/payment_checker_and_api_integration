@@ -12,11 +12,12 @@ import 'sms_history_database.dart';
 /// HTTP client for background / foreground isolates — no UI [ApiService] token required.
 class BackgroundPaymentApiClient {
   BackgroundPaymentApiClient._();
-  static final BackgroundPaymentApiClient instance = BackgroundPaymentApiClient._();
+  static final BackgroundPaymentApiClient instance =
+      BackgroundPaymentApiClient._();
 
-  static const _tokenKey = 'auth_token';
-  static const _apiBaseKey = 'api_base_url';
-  static const _deviceIdKey = 'hardware_device_id_v1';
+  static const _tokenKey = 'pcu_auth_token_v1';
+  static const _apiBaseKey = 'pcu_api_base_v1';
+  static const _deviceIdKey = 'pcu_hw_device_id_v1';
 
   static const Duration _timeout = Duration(seconds: 20);
 
@@ -155,9 +156,5 @@ class _Session {
   final String baseUrl;
   final String? deviceId;
 
-  const _Session({
-    required this.token,
-    required this.baseUrl,
-    this.deviceId,
-  });
+  const _Session({required this.token, required this.baseUrl, this.deviceId});
 }

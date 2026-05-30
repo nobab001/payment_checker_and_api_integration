@@ -27,7 +27,10 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
     if (!_formKey.currentState!.validate()) return;
     final auth = context.read<AdminAuthProvider>();
     final ok = await auth.signIn(_emailCtrl.text.trim(), _passCtrl.text);
-    if (!ok && mounted && auth.error != null) {
+    if (ok && mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+    } else if (!ok && mounted && auth.error != null) {
+      ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(auth.error!), backgroundColor: Colors.red[700]),
       );
@@ -49,8 +52,11 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Icon(Icons.admin_panel_settings,
-                      size: 72, color: Color(0xFF4FC3F7)),
+                  const Icon(
+                    Icons.admin_panel_settings,
+                    size: 72,
+                    color: Color(0xFF4FC3F7),
+                  ),
                   const SizedBox(height: 16),
                   const Text(
                     'Admin Panel',
@@ -73,8 +79,9 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                     label: 'Admin Email',
                     icon: Icons.email_outlined,
                     keyboardType: TextInputType.emailAddress,
-                    validator: (v) =>
-                        (v == null || !v.contains('@')) ? 'Valid email required' : null,
+                    validator: (v) => (v == null || !v.contains('@'))
+                        ? 'Valid email required'
+                        : null,
                   ),
                   const SizedBox(height: 16),
                   _field(
@@ -100,7 +107,8 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                       foregroundColor: const Color(0xFF0D1B2A),
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                       elevation: 0,
                     ),
                     child: auth.loading
@@ -108,19 +116,32 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                             height: 20,
                             width: 20,
                             child: CircularProgressIndicator(
-                                color: Color(0xFF0D1B2A), strokeWidth: 2),
+                              color: Color(0xFF0D1B2A),
+                              strokeWidth: 2,
+                            ),
                           )
-                        : const Text('Sign In',
+                        : const Text(
+                            'Sign In',
                             style: TextStyle(
-                                fontSize: 16, fontWeight: FontWeight.bold)),
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                   ),
                   const SizedBox(height: 16),
                   Center(
                     child: TextButton.icon(
-                      icon: const Icon(Icons.settings_ethernet, size: 18, color: Color(0xFF4FC3F7)),
+                      icon: const Icon(
+                        Icons.settings_ethernet,
+                        size: 18,
+                        color: Color(0xFF4FC3F7),
+                      ),
                       label: const Text(
                         'Change Server Address',
-                        style: TextStyle(color: Color(0xFF4FC3F7), fontSize: 13),
+                        style: TextStyle(
+                          color: Color(0xFF4FC3F7),
+                          fontSize: 13,
+                        ),
                       ),
                       onPressed: _changeServerAddress,
                     ),
@@ -173,7 +194,10 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: Colors.white54),
+            ),
           ),
           ElevatedButton(
             onPressed: () async {
@@ -226,12 +250,12 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
         filled: true,
         fillColor: const Color(0xFF1A2E42),
         border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide.none),
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide.none,
+        ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide:
-              const BorderSide(color: Color(0xFF4FC3F7), width: 2),
+          borderSide: const BorderSide(color: Color(0xFF4FC3F7), width: 2),
         ),
         errorStyle: const TextStyle(color: Color(0xFFFF8A80)),
       ),

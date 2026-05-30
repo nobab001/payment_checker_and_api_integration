@@ -14,25 +14,25 @@ class SimFilterLocalRepository {
   SimFilterLocalRepository._();
   static final SimFilterLocalRepository instance = SimFilterLocalRepository._();
 
-  static const String kSim1Active = 'sim_1_active';
-  static const String kSim1AllowedSenders = 'sim_1_allowed_senders';
-  static const String kSim1Number = 'sim_1_number';
-  static const String kSim1ProviderTags = 'sim_1_provider_tags';
-  static const String kSim1CustomSenders = 'sim_1_custom_senders';
-  static const String kSim2Active = 'sim_2_active';
-  static const String kBankAccounts = 'device_bank_accounts_v1';
-  static const String kSim2AllowedSenders = 'sim_2_allowed_senders';
-  static const String kSim2Number = 'sim_2_number';
-  static const String kSim2ProviderTags = 'sim_2_provider_tags';
-  static const String kSim2CustomSenders = 'sim_2_custom_senders';
+  static const String kSim1Active = 'pcu_sim_1_active';
+  static const String kSim1AllowedSenders = 'pcu_sim_1_allowed_senders';
+  static const String kSim1Number = 'pcu_sim_1_number';
+  static const String kSim1ProviderTags = 'pcu_sim_1_provider_tags';
+  static const String kSim1CustomSenders = 'pcu_sim_1_custom_senders';
+  static const String kSim2Active = 'pcu_sim_2_active';
+  static const String kBankAccounts = 'pcu_device_bank_accounts_v1';
+  static const String kSim2AllowedSenders = 'pcu_sim_2_allowed_senders';
+  static const String kSim2Number = 'pcu_sim_2_number';
+  static const String kSim2ProviderTags = 'pcu_sim_2_provider_tags';
+  static const String kSim2CustomSenders = 'pcu_sim_2_custom_senders';
 
   /// Legacy alias keys (read-only fallback).
-  static const String kLegacySim1List = 'sim1_list';
-  static const String kLegacySim2List = 'sim2_list';
+  static const String kLegacySim1List = 'pcu_sim1_list';
+  static const String kLegacySim2List = 'pcu_sim2_list';
 
   /// Set after first default seed or user taps Save.
-  static const String kSeeded = 'sim_filter_seeded_v2';
-  static const String kSchemaVersion = 'sim_filter_schema_version';
+  static const String kSeeded = 'pcu_sim_filter_seeded_v2';
+  static const String kSchemaVersion = 'pcu_sim_filter_schema_version';
   static const int kCurrentSchemaVersion = 3;
 
   SharedPreferences? _prefs;
@@ -77,7 +77,8 @@ class SimFilterLocalRepository {
     final p = await load();
     final sim1 = canonicalizeAllowedSenderList(p.sim1AllowedSenders);
     final sim2 = canonicalizeAllowedSenderList(p.sim2AllowedSenders);
-    if (!_listEq(sim1, p.sim1AllowedSenders) || !_listEq(sim2, p.sim2AllowedSenders)) {
+    if (!_listEq(sim1, p.sim1AllowedSenders) ||
+        !_listEq(sim2, p.sim2AllowedSenders)) {
       await save(
         p.copyWith(sim1AllowedSenders: sim1, sim2AllowedSenders: sim2),
       );
@@ -124,10 +125,12 @@ class SimFilterLocalRepository {
 
   Future<SimFilterPreferences> load() async {
     final sp = await _sp();
-    final sim1List = sp.getStringList(kSim1AllowedSenders) ??
+    final sim1List =
+        sp.getStringList(kSim1AllowedSenders) ??
         sp.getStringList(kLegacySim1List) ??
         const <String>[];
-    final sim2List = sp.getStringList(kSim2AllowedSenders) ??
+    final sim2List =
+        sp.getStringList(kSim2AllowedSenders) ??
         sp.getStringList(kLegacySim2List) ??
         const <String>[];
     final bankAccountsRaw = sp.getString(kBankAccounts) ?? '[]';
@@ -135,7 +138,11 @@ class SimFilterLocalRepository {
     try {
       final decoded = jsonDecode(bankAccountsRaw) as List<dynamic>;
       bankAccounts = decoded
-          .map((e) => CheckoutNumberSlot.fromJson(Map<String, dynamic>.from(e as Map)))
+          .map(
+            (e) => CheckoutNumberSlot.fromJson(
+              Map<String, dynamic>.from(e as Map),
+            ),
+          )
           .toList();
     } catch (_) {}
 
@@ -157,7 +164,9 @@ class SimFilterLocalRepository {
   /// Writes all SIM keys to disk with await on every field.
   Future<void> save(SimFilterPreferences prefs) async {
     final sp = await _sp();
-    final bankAccountsJson = jsonEncode(prefs.bankAccounts.map((e) => e.toJson()).toList());
+    final bankAccountsJson = jsonEncode(
+      prefs.bankAccounts.map((e) => e.toJson()).toList(),
+    );
     final ok = <bool>[
       await sp.setBool(kSim1Active, prefs.sim1Active),
       await sp.setStringList(kSim1AllowedSenders, prefs.sim1AllowedSenders),
@@ -197,7 +206,7 @@ class SimFilterLocalRepository {
     final local = await loadSettings();
     final configuredOnDevice =
         await SmsAutomationPrefs.isConfigured() &&
-            DeviceSetupValidator.isDeviceConfigured(local);
+        DeviceSetupValidator.isDeviceConfigured(local);
 
     // User already saved SIM numbers + senders on this phone — never wipe from VPS.
     if (configuredOnDevice) {
@@ -214,7 +223,8 @@ class SimFilterLocalRepository {
     List<String> pick(List<String> server, List<String> localList) {
       if (server.isNotEmpty) return List<String>.from(server);
       if (localList.isNotEmpty) return localList;
-      if (!seeded) return List<String>.from(SimFilterPreferences.defaultSenders);
+      if (!seeded)
+        return List<String>.from(SimFilterPreferences.defaultSenders);
       return localList;
     }
 

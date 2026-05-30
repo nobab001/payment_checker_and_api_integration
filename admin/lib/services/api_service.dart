@@ -7,7 +7,7 @@ class ApiService {
   ApiService._();
   static final instance = ApiService._();
 
-  static const String _tokenKey = 'admin_token';
+  static const String _tokenKey = 'pca_auth_token_v1';
   String? _token;
 
   String? get token => _token;
@@ -79,7 +79,11 @@ class ApiService {
     throw Exception('DELETE $path failed: ${res.statusCode} ${res.body}');
   }
 
-  Future<http.Response> _request(String method, String path, {dynamic body}) async {
+  Future<http.Response> _request(
+    String method,
+    String path, {
+    dynamic body,
+  }) async {
     final headers = <String, String>{
       'Content-Type': 'application/json',
       'Accept': 'application/json',

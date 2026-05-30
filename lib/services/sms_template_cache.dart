@@ -10,9 +10,9 @@ class SmsTemplateCache {
   SmsTemplateCache._();
   static final SmsTemplateCache instance = SmsTemplateCache._();
 
-  static const _cacheKey = 'sms_templates_json_v2';
-  static const _cacheAtKey = 'sms_templates_cached_at_v2';
-  static const _revisionKey = 'sms_templates_revision_v1';
+  static const _cacheKey = 'pcu_sms_templates_json_v2';
+  static const _cacheAtKey = 'pcu_sms_templates_cached_at_v2';
+  static const _revisionKey = 'pcu_sms_templates_revision_v1';
 
   List<SmsTemplate> _memory = [];
   DateTime? _cachedAt;
@@ -57,10 +57,7 @@ class SmsTemplateCache {
       final revisionChanged =
           remoteRevision.isNotEmpty && remoteRevision != localRevision;
 
-      if (!force &&
-          _memory.isNotEmpty &&
-          _isFresh() &&
-          !revisionChanged) {
+      if (!force && _memory.isNotEmpty && _isFresh() && !revisionChanged) {
         return;
       }
 

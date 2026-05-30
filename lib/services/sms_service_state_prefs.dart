@@ -11,7 +11,7 @@ class SmsServiceStatePrefs {
   SmsServiceStatePrefs._();
 
   /// True after user taps Start Monitoring on Home (survives kill + reboot).
-  static const _serviceActivatedKey = 'sms_service_activated_v1';
+  static const _serviceActivatedKey = 'pcu_sms_service_activated_v1';
 
   /// Background SMS pipeline should be active (Home shows RUNNING).
   static Future<bool> isServiceActivated() async {

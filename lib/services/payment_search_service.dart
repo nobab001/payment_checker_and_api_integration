@@ -13,8 +13,8 @@ class PaymentSearchService {
   PaymentSearchService._();
   static final PaymentSearchService instance = PaymentSearchService._();
 
-  static const _tokenKey = 'auth_token';
-  static const _apiBaseKey = 'api_base_url';
+  static const _tokenKey = 'pcu_auth_token_v1';
+  static const _apiBaseKey = 'pcu_api_base_v1';
   static const Duration _timeout = Duration(seconds: 25);
 
   /// Local SQLite first; if empty, POST /api/payments/search and cache results.
@@ -98,11 +98,10 @@ class PaymentSearchService {
   }
 
   SmsRecord _recordFromServer(Map<String, dynamic> j) {
-    final ts = j['sms_timestamp']?.toString() ??
+    final ts =
+        j['sms_timestamp']?.toString() ??
         '${j['sms_date'] ?? ''} ${j['sms_time'] ?? ''}'.trim();
-    final t = ts.isNotEmpty
-        ? ts
-        : DateTime.now().toIso8601String();
+    final t = ts.isNotEmpty ? ts : DateTime.now().toIso8601String();
     final amt = double.tryParse(j['amount']?.toString() ?? '0') ?? 0;
     final tag = j['provider_tag']?.toString() ?? '';
     return SmsRecord(
@@ -114,7 +113,8 @@ class PaymentSearchService {
       am: amt,
       trxId: j['trx_id']?.toString(),
       simSlot: (j['sim_slot'] as num?)?.toInt(),
-      simNumber: j['receiver_number']?.toString() ?? j['sim_number']?.toString(),
+      simNumber:
+          j['receiver_number']?.toString() ?? j['sim_number']?.toString(),
       providerTag: tag,
       senderNumber: j['sender_number']?.toString(),
     );

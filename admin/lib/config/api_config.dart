@@ -10,12 +10,12 @@ const String kDevLanHost = '192.168.0.116';
 const String kDevPort = '3000';
 
 void initAdminApiBaseUrl(SharedPreferences prefs) {
-  final saved = prefs.getString('api_base_url_override')?.trim();
+  final saved = prefs.getString('pca_api_base_url_v1')?.trim();
   if (saved != null && saved.isNotEmpty) {
     _adminApiBaseUrl = saved;
     return;
   }
-  
+
   if (kIsWeb) {
     _adminApiBaseUrl = 'http://127.0.0.1:$kDevPort';
     return;
@@ -38,10 +38,10 @@ Future<void> setAdminApiBaseUrl(String url) async {
   final prefs = await SharedPreferences.getInstance();
   final normalized = url.trim().replaceAll(RegExp(r'/+$'), '');
   if (normalized.isNotEmpty) {
-    await prefs.setString('api_base_url_override', normalized);
+    await prefs.setString('pca_api_base_url_v1', normalized);
     _adminApiBaseUrl = normalized;
   } else {
-    await prefs.remove('api_base_url_override');
+    await prefs.remove('pca_api_base_url_v1');
     initAdminApiBaseUrl(prefs);
   }
 }

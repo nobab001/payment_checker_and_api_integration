@@ -33,7 +33,7 @@ Future<void> onBackgroundSms(SmsMessage message) async {
 Future<void> _ingestLegacy(SmsRecord record) async {
   try {
     final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
+    final token = prefs.getString('pcu_auth_token_v1');
     if (token == null || token.isEmpty) return;
     ApiService.instance.setAuthToken(token);
     await ApiService.instance.ingestSms(record);
@@ -62,8 +62,9 @@ class SmsService {
         await LocalSmsForwardService.instance.tryForwardIncomingSms(message);
         if (!await SmsServiceStatePrefs.shouldResumeService()) return;
 
-        final processed =
-            await PaymentSmsProcessor.instance.processIncoming(message);
+        final processed = await PaymentSmsProcessor.instance.processIncoming(
+          message,
+        );
         if (processed == null) return;
 
         // Local-first dual-write: disk cache → optional LAN sync → remote API.
@@ -105,6 +106,5 @@ class SmsService {
   /// Disabled — app only processes live incoming SMS, never reads device inbox.
   Future<List<SmsRecord>> loadInboxHistory({
     bool paymentSendersOnly = false,
-  }) async =>
-      [];
+  }) async => [];
 }

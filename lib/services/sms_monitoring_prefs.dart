@@ -4,8 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 class SmsMonitoringPrefs {
   SmsMonitoringPrefs._();
 
-  static const _monitoringKey = 'sms_monitoring_enabled';
-  static const _initialInboxKey = 'sms_initial_inbox_import_done';
+  static const _monitoringKey = 'pcu_sms_monitoring_enabled';
+  static const _initialInboxKey = 'pcu_sms_initial_inbox_import_done';
 
   static Future<bool> isMonitoringEnabled() async {
     final p = await SharedPreferences.getInstance();

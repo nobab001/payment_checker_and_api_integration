@@ -17,8 +17,9 @@ CREATE TABLE IF NOT EXISTS sms_settings (
   id                  INT AUTO_INCREMENT PRIMARY KEY,
   gateway_url         VARCHAR(512)  NOT NULL COMMENT 'SMS gateway base URL with placeholders',
   http_method         VARCHAR(10)   NOT NULL DEFAULT 'GET' COMMENT 'GET or POST',
-  post_body_template  TEXT          DEFAULT NULL COMMENT 'JSON body template for POST (use {phone}, {message}, {apiKey}, {senderId})',
+  post_body_template  TEXT          DEFAULT NULL COMMENT 'JSON body template for POST (use {phone}, {message}, {apiKey}, {senderId}, {username})',
   api_key             VARCHAR(255)  DEFAULT NULL,
+  username            VARCHAR(255)  DEFAULT NULL COMMENT 'SMS provider username (optional)',
   sender_id           VARCHAR(50)   DEFAULT NULL,
   is_active           TINYINT(1)    NOT NULL DEFAULT 0,
   label               VARCHAR(100)  DEFAULT NULL COMMENT 'Friendly name e.g. BulkSMSBD',
@@ -122,3 +123,28 @@ ALTER TABLE sms_records ADD COLUMN IF NOT EXISTS sim_number VARCHAR(32) DEFAULT 
 ALTER TABLE sms_records ADD COLUMN IF NOT EXISTS provider_tag VARCHAR(64) DEFAULT NULL;
 ALTER TABLE sms_records ADD COLUMN IF NOT EXISTS trx_id VARCHAR(64) DEFAULT NULL;
 ALTER TABLE sms_records ADD COLUMN IF NOT EXISTS sender_number VARCHAR(32) DEFAULT NULL;
+
+-- 8. email_accounts — multiple Gmail SMTP accounts for OTP with round-robin
+CREATE TABLE IF NOT EXISTS email_accounts (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  email         VARCHAR(255)  NOT NULL,
+  app_password  VARCHAR(255)  NOT NULL,
+  daily_limit   INT           NOT NULL DEFAULT 500 COMMENT 'Max OTP emails per day for this account',
+  sent_count    INT           NOT NULL DEFAULT 0   COMMENT 'Emails sent today (reset by server or manually)',
+  is_active     TINYINT(1)    NOT NULL DEFAULT 0,
+  created_at    TIMESTAMP     DEFAULT CURRENT_TIMESTAMP,
+  updated_at    TIMESTAMP     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 9. Migrate existing single emailConfig from settings into email_accounts
+INSERT INTO email_accounts (email, app_password, daily_limit, sent_count, is_active)
+SELECT
+  COALESCE(JSON_UNQUOTE(JSON_EXTRACT(setting_value, '$.gmailAddress')), JSON_UNQUOTE(JSON_EXTRACT(setting_value, '$.email')), ''),
+  COALESCE(JSON_UNQUOTE(JSON_EXTRACT(setting_value, '$.appPassword')), JSON_UNQUOTE(JSON_EXTRACT(setting_value, '$.password')), ''),
+  500, 0, 1
+FROM settings WHERE setting_key = 'emailConfig'
+  AND JSON_UNQUOTE(JSON_EXTRACT(setting_value, '$.gmailAddress')) IS NOT NULL
+  AND JSON_UNQUOTE(JSON_EXTRACT(setting_value, '$.gmailAddress')) <> ''
+  AND JSON_UNQUOTE(JSON_EXTRACT(setting_value, '$.appPassword')) IS NOT NULL
+  AND JSON_UNQUOTE(JSON_EXTRACT(setting_value, '$.appPassword')) <> ''
+ON DUPLICATE KEY UPDATE id = id;

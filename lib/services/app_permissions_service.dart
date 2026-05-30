@@ -3,8 +3,7 @@ import 'package:flutter/foundation.dart'
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-const _kNotificationPromptPrefsKey =
-    'payment_checker.notification_permission_prompted_v1';
+const _kNotificationPromptPrefsKey = 'pcu_notification_permission_prompted_v1';
 
 /// Android SMS is required for the app. Notification is optional (asked once).
 class AppPermissionsService {

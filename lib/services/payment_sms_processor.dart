@@ -32,7 +32,7 @@ class PaymentSmsProcessor {
     if (!SmsTemplateCache.instance.hasTemplates) {
       try {
         final sp = await SharedPreferences.getInstance();
-        final token = sp.getString('auth_token')?.trim();
+        final token = sp.getString('pcu_auth_token_v1')?.trim();
         if (token != null && token.isNotEmpty) {
           ApiService.instance.setAuthToken(token);
           await ApiService.instance.syncBaseUrlFromPrefs();
@@ -73,8 +73,9 @@ class PaymentSmsProcessor {
     if (body.trim().isEmpty) return null;
 
     final ts = message.date != null
-        ? DateFormat('yyyy-MM-dd HH:mm:ss')
-            .format(DateTime.fromMillisecondsSinceEpoch(message.date!))
+        ? DateFormat(
+            'yyyy-MM-dd HH:mm:ss',
+          ).format(DateTime.fromMillisecondsSinceEpoch(message.date!))
         : DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now());
 
     if (!_templateCache.hasTemplates) {
@@ -188,8 +189,9 @@ class PaymentSmsProcessor {
     final tags = slot == 0 ? prefs.sim1ProviderTags : prefs.sim2ProviderTags;
     if (tags.isEmpty) return null;
 
-    final legacySenders =
-        slot == 0 ? prefs.sim1AllowedSenders : prefs.sim2AllowedSenders;
+    final legacySenders = slot == 0
+        ? prefs.sim1AllowedSenders
+        : prefs.sim2AllowedSenders;
 
     for (final preview in tags) {
       final tpl = _templateCache.findByCustomerPreview(preview);
@@ -231,8 +233,9 @@ class PaymentSmsProcessor {
   }
 
   Future<void> syncToServer(ProcessedPaymentSms processed) async {
-    final payload =
-        PaymentSmsIngestPayload.fromJsonMap(processed.ingestPayload);
+    final payload = PaymentSmsIngestPayload.fromJsonMap(
+      processed.ingestPayload,
+    );
     final key = SmsHistoryDatabase.dedupeKey(processed.record);
     await BackgroundPaymentApiClient.instance.ingest(
       payload,

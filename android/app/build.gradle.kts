@@ -28,6 +28,7 @@ android {
     }
 
     // Two installable apps on one device (distinct entry points: main_user vs main_admin).
+    // CRITICAL: Keep these applicationIds different. Same id = same SharedPreferences = shared login state.
     flavorDimensions += "default"
     productFlavors {
         create("user") {

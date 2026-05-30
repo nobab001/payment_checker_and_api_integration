@@ -46,19 +46,8 @@ function getGmailTransport() {
   return _gmailTransport;
 }
 
-/**
- * Send 6-digit OTP to the user's Gmail (same `otps.phone` column stores the address string).
- */
-async function sendOtpToGmail(toAddress, code) {
-  const transport = getGmailTransport();
-  if (!transport) {
-    const err = new Error(
-      "Gmail OTP not configured: set GMAIL_USER and GMAIL_APP_PASSWORD in .env"
-    );
-    err.statusCode = 503;
-    throw err;
-  }
-  const from = process.env.GMAIL_FROM || GMAIL_USER;
+async function sendViaTransport(transport, toAddress, code, fromEmail) {
+  const from = process.env.GMAIL_FROM || fromEmail;
   const subject = process.env.GMAIL_OTP_SUBJECT || "আপনার OTP কোড - Payment Checker";
   await transport.sendMail({
     from: `"Payment Checker" <${from}>`,
@@ -73,6 +62,57 @@ async function sendOtpToGmail(toAddress, code) {
         <p style="color:#666;font-size:14px">এই কোড কাউকে দেবেন না।</p>
       </div>`,
   });
+}
+
+/**
+ * Send 6-digit OTP to the user's Gmail using round-robin from email_accounts.
+ * Falls back to env-based single account if no DB accounts configured.
+ */
+async function sendOtpToGmail(toAddress, code) {
+  // 1. Try database email_accounts first (round-robin)
+  try {
+    const [accounts] = await pool.query(
+      "SELECT * FROM email_accounts WHERE is_active = 1 ORDER BY id ASC"
+    );
+
+    if (accounts.length > 0) {
+      // Find first account that hasn't hit its daily limit
+      let account = accounts.find((a) => a.sent_count < a.daily_limit);
+
+      // If all accounts at limit, reset all counters and use first
+      if (!account) {
+        await pool.query("UPDATE email_accounts SET sent_count = 0 WHERE is_active = 1");
+        account = accounts[0];
+      }
+
+      const transport = nodemailer.createTransport({
+        service: "gmail",
+        auth: { user: account.email, pass: account.app_password },
+      });
+
+      await sendViaTransport(transport, toAddress, code, account.email);
+
+      // Increment counter for this account
+      await pool.query(
+        "UPDATE email_accounts SET sent_count = sent_count + 1 WHERE id = ?",
+        [account.id]
+      );
+      return;
+    }
+  } catch (dbErr) {
+    console.error("[sendOtpToGmail] DB round-robin failed, falling back to env:", dbErr.message);
+  }
+
+  // 2. Fallback to env-based single Gmail account
+  const transport = getGmailTransport();
+  if (!transport) {
+    const err = new Error(
+      "Gmail OTP not configured: add email accounts in admin or set GMAIL_USER and GMAIL_APP_PASSWORD in .env"
+    );
+    err.statusCode = 503;
+    throw err;
+  }
+  await sendViaTransport(transport, toAddress, code, GMAIL_USER);
 }
 
 const pool = mysql.createPool({
@@ -376,25 +416,27 @@ function generateOtp() {
 
 /**
  * Replace placeholders (same convention as legacy Firebase gateway):
- *   {apiKey} {phone} {message} {senderId}
+ *   {apiKey} {phone} {message} {senderId} {username}
  */
-function applyTemplateEncoded(tpl, { apiKey, phone, message, senderId }) {
+function applyTemplateEncoded(tpl, { apiKey, phone, message, senderId, username }) {
   if (!tpl || typeof tpl !== "string") return tpl;
   return tpl
     .replace(/\{apiKey\}/g, encodeURIComponent(apiKey != null ? String(apiKey) : ""))
     .replace(/\{phone\}/g, encodeURIComponent(phone != null ? String(phone) : ""))
     .replace(/\{message\}/g, encodeURIComponent(message != null ? String(message) : ""))
-    .replace(/\{senderId\}/g, encodeURIComponent(senderId != null ? String(senderId) : ""));
+    .replace(/\{senderId\}/g, encodeURIComponent(senderId != null ? String(senderId) : ""))
+    .replace(/\{username\}/g, encodeURIComponent(username != null ? String(username) : ""));
 }
 
 /** Same placeholders, no encoding — for JSON POST bodies. */
-function applyTemplateRaw(tpl, { apiKey, phone, message, senderId }) {
+function applyTemplateRaw(tpl, { apiKey, phone, message, senderId, username }) {
   if (!tpl || typeof tpl !== "string") return tpl;
   return tpl
     .replace(/\{apiKey\}/g, () => String(apiKey ?? ""))
     .replace(/\{phone\}/g, () => String(phone ?? ""))
     .replace(/\{message\}/g, () => String(message ?? ""))
-    .replace(/\{senderId\}/g, () => String(senderId ?? ""));
+    .replace(/\{senderId\}/g, () => String(senderId ?? ""))
+    .replace(/\{username\}/g, () => String(username ?? ""));
 }
 
 /**
@@ -402,7 +444,7 @@ function applyTemplateRaw(tpl, { apiKey, phone, message, senderId }) {
  */
 async function dispatchSmsFromSettings(phone, messageText) {
   const [rows] = await pool.query(
-    `SELECT gateway_url, http_method, post_body_template, api_key, sender_id
+    `SELECT gateway_url, http_method, post_body_template, api_key, username, sender_id
      FROM sms_settings
      WHERE is_active = 1
      ORDER BY id ASC
@@ -416,10 +458,11 @@ async function dispatchSmsFromSettings(phone, messageText) {
 
   const s = rows[0];
   const apiKey = s.api_key;
+  const username = s.username;
   const senderId = s.sender_id;
   const method = String(s.http_method || "GET").toUpperCase();
   const gatewayPhone = isBdPhone(phone) ? normalizeBdPhoneForGateway(phone) : phone;
-  const subs = { apiKey, phone: gatewayPhone, message: messageText, senderId };
+  const subs = { apiKey, phone: gatewayPhone, message: messageText, senderId, username };
 
   if (method === "POST") {
     const url = applyTemplateEncoded(s.gateway_url, subs);
@@ -457,8 +500,10 @@ async function dispatchSmsFromSettings(phone, messageText) {
   }
 
   const url = applyTemplateEncoded(s.gateway_url, subs);
+  console.log(`[SMS] GET → ${url}`);
   const res = await fetch(url, { method: "GET", signal: AbortSignal.timeout(15_000) });
   if (!res.ok) {
+    console.error(`[SMS] GET failed HTTP ${res.status} → ${url}`);
     const err = new Error(`SMS gateway HTTP ${res.status}`);
     err.statusCode = res.status >= 500 ? 502 : 400;
     throw err;
@@ -1017,6 +1062,21 @@ app.get("/api/admin/config", adminKeyMiddleware, async (req, res) => {
     for (const r of rows) {
       config[r.setting_key] = JSON.parse(r.setting_value);
     }
+    // Also include live email_accounts from DB
+    try {
+      const [eaRows] = await pool.query("SELECT * FROM email_accounts ORDER BY id ASC");
+      config.emailAccounts = eaRows.map((r) => ({
+        id: String(r.id),
+        email: r.email || "",
+        appPassword: r.app_password || "",
+        dailyLimit: Number(r.daily_limit) || 500,
+        sentCount: Number(r.sent_count) || 0,
+        isActive: Boolean(r.is_active),
+      }));
+    } catch (eaErr) {
+      console.error("[admin/config] emailAccounts query failed:", eaErr.message);
+      config.emailAccounts = [];
+    }
     return res.json({ success: true, config });
   } catch (e) {
     console.error("[admin/config] get:", e);
@@ -1047,6 +1107,7 @@ app.get("/api/admin/sms-settings", adminKeyMiddleware, async (req, res) => {
       id: String(r.id),
       name: r.label || "",
       apiKey: r.api_key || "",
+      username: r.username || "",
       endpoint: r.gateway_url || "",
       senderId: r.sender_id || "",
       isActive: Boolean(r.is_active)
@@ -1064,14 +1125,15 @@ app.post("/api/admin/sms-settings", adminKeyMiddleware, async (req, res) => {
   const httpMethod = String(req.body?.httpMethod || "GET").trim();
   const postBodyTemplate = String(req.body?.postBodyTemplate || "").trim();
   const apiKey = String(req.body?.apiKey || "").trim();
+  const username = String(req.body?.username || "").trim();
   const senderId = String(req.body?.senderId || "").trim();
   const isActive = req.body?.isActive === true || req.body?.isActive === 1 ? 1 : 0;
 
   try {
     const [result] = await pool.query(
-      `INSERT INTO sms_settings (label, gateway_url, http_method, post_body_template, api_key, sender_id, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [name, endpoint, httpMethod, postBodyTemplate || null, apiKey, senderId, isActive]
+      `INSERT INTO sms_settings (label, gateway_url, http_method, post_body_template, api_key, username, sender_id, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [name, endpoint, httpMethod, postBodyTemplate || null, apiKey, username, senderId, isActive]
     );
     return res.json({ success: true, id: String(result.insertId) });
   } catch (e) {
@@ -1087,15 +1149,16 @@ app.put("/api/admin/sms-settings/:id", adminKeyMiddleware, async (req, res) => {
   const httpMethod = String(req.body?.httpMethod || "GET").trim();
   const postBodyTemplate = String(req.body?.postBodyTemplate || "").trim();
   const apiKey = String(req.body?.apiKey || "").trim();
+  const username = String(req.body?.username || "").trim();
   const senderId = String(req.body?.senderId || "").trim();
   const isActive = req.body?.isActive === true || req.body?.isActive === 1 ? 1 : 0;
 
   try {
     await pool.query(
       `UPDATE sms_settings 
-       SET label = ?, gateway_url = ?, http_method = ?, post_body_template = ?, api_key = ?, sender_id = ?, is_active = ?
+       SET label = ?, gateway_url = ?, http_method = ?, post_body_template = ?, api_key = ?, username = ?, sender_id = ?, is_active = ?
        WHERE id = ?`,
-      [name, endpoint, httpMethod, postBodyTemplate || null, apiKey, senderId, isActive, id]
+      [name, endpoint, httpMethod, postBodyTemplate || null, apiKey, username, senderId, isActive, id]
     );
     return res.json({ success: true });
   } catch (e) {
@@ -1140,6 +1203,112 @@ app.post("/api/admin/sms-settings/:id/deactivate", adminKeyMiddleware, async (re
     return res.json({ success: true });
   } catch (e) {
     console.error("[admin/sms-settings] deactivate:", e);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// ── Admin Email Accounts management (requires x-admin-key) ────────────────────
+
+app.get("/api/admin/email-accounts", adminKeyMiddleware, async (req, res) => {
+  try {
+    const [rows] = await pool.query("SELECT * FROM email_accounts ORDER BY id ASC");
+    const accounts = rows.map((r) => ({
+      id: String(r.id),
+      email: r.email || "",
+      appPassword: r.app_password || "",
+      dailyLimit: Number(r.daily_limit) || 500,
+      sentCount: Number(r.sent_count) || 0,
+      isActive: Boolean(r.is_active),
+    }));
+    return res.json({ success: true, accounts });
+  } catch (e) {
+    console.error("[admin/email-accounts] list:", e);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+app.post("/api/admin/email-accounts", adminKeyMiddleware, async (req, res) => {
+  const email = String(req.body?.email || "").trim();
+  const appPassword = String(req.body?.appPassword || "").trim();
+  const dailyLimit = Number(req.body?.dailyLimit) || 500;
+  const isActive = req.body?.isActive === true || req.body?.isActive === 1 ? 1 : 0;
+
+  if (!email || !appPassword || !email.includes("@")) {
+    return res.status(400).json({ success: false, message: "Valid email and app password required" });
+  }
+
+  try {
+    const [result] = await pool.query(
+      `INSERT INTO email_accounts (email, app_password, daily_limit, sent_count, is_active)
+       VALUES (?, ?, ?, 0, ?)`,
+      [email, appPassword, dailyLimit, isActive]
+    );
+    return res.json({ success: true, id: String(result.insertId) });
+  } catch (e) {
+    console.error("[admin/email-accounts] create:", e);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+app.put("/api/admin/email-accounts/:id", adminKeyMiddleware, async (req, res) => {
+  const id = req.params.id;
+  const email = String(req.body?.email || "").trim();
+  const appPassword = String(req.body?.appPassword || "").trim();
+  const dailyLimit = Number(req.body?.dailyLimit) || 500;
+  const isActive = req.body?.isActive === true || req.body?.isActive === 1 ? 1 : 0;
+
+  if (!email || !appPassword || !email.includes("@")) {
+    return res.status(400).json({ success: false, message: "Valid email and app password required" });
+  }
+
+  try {
+    await pool.query(
+      `UPDATE email_accounts SET email = ?, app_password = ?, daily_limit = ?, is_active = ? WHERE id = ?`,
+      [email, appPassword, dailyLimit, isActive, id]
+    );
+    return res.json({ success: true });
+  } catch (e) {
+    console.error("[admin/email-accounts] update:", e);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+app.delete("/api/admin/email-accounts/:id", adminKeyMiddleware, async (req, res) => {
+  const id = req.params.id;
+  try {
+    await pool.query("DELETE FROM email_accounts WHERE id = ?", [id]);
+    return res.json({ success: true });
+  } catch (e) {
+    console.error("[admin/email-accounts] delete:", e);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+app.post("/api/admin/email-accounts/:id/activate", adminKeyMiddleware, async (req, res) => {
+  const id = req.params.id;
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.query("UPDATE email_accounts SET is_active = 0");
+    await conn.query("UPDATE email_accounts SET is_active = 1 WHERE id = ?", [id]);
+    await conn.commit();
+    return res.json({ success: true });
+  } catch (e) {
+    await conn.rollback();
+    console.error("[admin/email-accounts] activate:", e);
+    return res.status(500).json({ success: false, message: "Server error" });
+  } finally {
+    conn.release();
+  }
+});
+
+app.post("/api/admin/email-accounts/:id/deactivate", adminKeyMiddleware, async (req, res) => {
+  const id = req.params.id;
+  try {
+    await pool.query("UPDATE email_accounts SET is_active = 0 WHERE id = ?", [id]);
+    return res.json({ success: true });
+  } catch (e) {
+    console.error("[admin/email-accounts] deactivate:", e);
     return res.status(500).json({ success: false, message: "Server error" });
   }
 });

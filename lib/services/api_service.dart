@@ -49,7 +49,7 @@ class ApiService {
   ApiService._();
   static final ApiService instance = ApiService._();
 
-  static const String _apiBasePrefKey = 'api_base_url';
+  static const String _apiBasePrefKey = 'pcu_api_base_v1';
 
   String? _authToken;
   String? _hardwareDeviceId;
@@ -71,9 +71,9 @@ class ApiService {
     try {
       final prefs = await SharedPreferences.getInstance();
       if (id == null || id.isEmpty) {
-        await prefs.remove('hardware_device_id_v1');
+        await prefs.remove('pcu_hw_device_id_v1');
       } else {
-        await prefs.setString('hardware_device_id_v1', id);
+        await prefs.setString('pcu_hw_device_id_v1', id);
       }
     } catch (_) {}
   }
@@ -87,9 +87,7 @@ class ApiService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getString(_apiBasePrefKey)?.trim();
-      if (saved != null &&
-          saved.isNotEmpty &&
-          !isStaleApiBaseUrl(saved)) {
+      if (saved != null && saved.isNotEmpty && !isStaleApiBaseUrl(saved)) {
         _apiBase = normalizeApiBaseUrl(saved);
         return;
       }
@@ -185,16 +183,10 @@ class ApiService {
 
   Never _wrapNetworkError(Object e) {
     if (e is TimeoutException) {
-      throw const ApiException(
-        message: 'Server unreachable',
-        code: 'timeout',
-      );
+      throw const ApiException(message: 'Server unreachable', code: 'timeout');
     }
     // All socket / HTTP transport errors → single friendly message.
-    throw const ApiException(
-      message: 'Server unreachable',
-      code: 'network',
-    );
+    throw const ApiException(message: 'Server unreachable', code: 'network');
   }
 
   /// POST JSON; returns parsed object on 2xx. Throws [ApiException] otherwise.
@@ -210,11 +202,7 @@ class ApiService {
         headers.addAll(extraHeaders);
       }
       final res = await _sendWithConnectionRetries(
-        () => http.post(
-          _uri(path),
-          headers: headers,
-          body: jsonEncode(body),
-        ),
+        () => http.post(_uri(path), headers: headers, body: jsonEncode(body)),
       );
       final data = _decodeBody(res.body);
       if (res.statusCode >= 200 && res.statusCode < 300) return data;
@@ -372,9 +360,7 @@ class ApiService {
     String contact, {
     String? deviceId,
   }) async {
-    final body = <String, dynamic>{
-      'contact': normalizeContactForApi(contact),
-    };
+    final body = <String, dynamic>{'contact': normalizeContactForApi(contact)};
     final hw = deviceId?.trim();
     if (hw != null && hw.isNotEmpty) {
       body['deviceId'] = hw;
@@ -468,7 +454,10 @@ class ApiService {
           allowedKeywords: device.allowedKeywords,
           blockedKeywords: device.blockedKeywords,
         );
-    await DeviceSettingsCache.saveFromSimSettings(hw, sims); // → sim_1_* / sim_2_* keys
+    await DeviceSettingsCache.saveFromSimSettings(
+      hw,
+      sims,
+    ); // → sim_1_* / sim_2_* keys
   }
 
   /// Registers this hardware device; returns server row (status / is_parent).
@@ -509,7 +498,10 @@ class ApiService {
   Future<DeviceStatusResult> checkDeviceStatus(String hardwareDeviceId) async {
     final q = Uri.encodeQueryComponent(hardwareDeviceId);
     try {
-      final data = await getJson('/api/check-device-status?deviceId=$q', auth: true);
+      final data = await getJson(
+        '/api/check-device-status?deviceId=$q',
+        auth: true,
+      );
       final status = (data['status'] as String? ?? 'unknown').toLowerCase();
       DeviceModel? device;
       final raw = data['device'];
@@ -525,7 +517,8 @@ class ApiService {
         message: data['message'] as String?,
       );
     } on ApiException catch (e) {
-      final down = e.code == 'connection_failed' ||
+      final down =
+          e.code == 'connection_failed' ||
           e.code == 'network' ||
           e.code == 'timeout';
       if (down) {
@@ -564,7 +557,8 @@ class ApiService {
       }
       return list;
     } on ApiException catch (e) {
-      final down = e.code == 'connection_failed' ||
+      final down =
+          e.code == 'connection_failed' ||
           e.code == 'network' ||
           e.code == 'timeout';
       if (down) return [];
@@ -624,9 +618,7 @@ class ApiService {
     final data = await getJson('/api/auth/pin-contacts', auth: true);
     final raw = data['contacts'];
     if (raw is! List) return [];
-    return raw
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList();
+    return raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
   Future<UserModel> changePin({
@@ -658,7 +650,7 @@ class ApiService {
   }
 
   Future<({AccountCredentials credentials, UserModel? user})>
-      verifyAndLinkCredential({
+  verifyAndLinkCredential({
     required String contact,
     required String code,
   }) async {
@@ -730,7 +722,7 @@ class ApiService {
 
   /// Templates plus server revision (changes when admin edits any template).
   Future<({List<SmsTemplate> templates, String revision})>
-      fetchSmsTemplatesWithRevision() async {
+  fetchSmsTemplatesWithRevision() async {
     final data = await getJson('/api/sms-templates', auth: true);
     final list = data['templates'] as List<dynamic>? ?? [];
     final templates = list
@@ -747,7 +739,7 @@ class ApiService {
   Future<void> ingestPaymentSms(Map<String, dynamic> payload) async {
     if (_authToken == null) {
       final prefs = await SharedPreferences.getInstance();
-      final t = prefs.getString('auth_token');
+      final t = prefs.getString('pcu_auth_token_v1');
       if (t != null && t.isNotEmpty) setAuthToken(t);
     }
     final model = PaymentSmsIngestPayload.fromJsonMap(payload);
@@ -759,7 +751,8 @@ class ApiService {
     try {
       return await getJson('/api/devices', auth: true);
     } on ApiException catch (e) {
-      final transient = e.code == 'connection_failed' ||
+      final transient =
+          e.code == 'connection_failed' ||
           e.code == 'network' ||
           e.code == 'timeout';
       if (!transient) rethrow;
@@ -817,11 +810,10 @@ class ApiService {
     required String siteName,
     required String domainAddress,
   }) async {
-    final data = await postJson(
-      '/api/merchants',
-      {'site_name': siteName, 'domain_address': domainAddress},
-      auth: true,
-    );
+    final data = await postJson('/api/merchants', {
+      'site_name': siteName,
+      'domain_address': domainAddress,
+    }, auth: true);
     return MerchantSite.fromJson(
       Map<String, dynamic>.from(data['merchant'] as Map),
     );
@@ -837,15 +829,11 @@ class ApiService {
     String? domainAddress,
     String? siteName,
   }) async {
-    await patchJson(
-      '/api/merchants/$id',
-      {
-        'is_active': ?isActive,
-        'domain_address': ?domainAddress,
-        'site_name': ?siteName,
-      },
-      auth: true,
-    );
+    await patchJson('/api/merchants/$id', {
+      'is_active': ?isActive,
+      'domain_address': ?domainAddress,
+      'site_name': ?siteName,
+    }, auth: true);
   }
 
   Future<void> saveMerchantCheckoutLayout(int id, CheckoutLayout layout) async {
@@ -860,11 +848,9 @@ class ApiService {
     required int id,
     required String pin,
   }) async {
-    final data = await postJson(
-      '/api/merchants/$id/regenerate-key',
-      {'pin': pin},
-      auth: true,
-    );
+    final data = await postJson('/api/merchants/$id/regenerate-key', {
+      'pin': pin,
+    }, auth: true);
     return (
       apiKeyId: data['api_key_id']?.toString() ?? '',
       apiSecret: data['api_secret']?.toString() ?? '',

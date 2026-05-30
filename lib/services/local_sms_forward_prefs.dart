@@ -6,8 +6,8 @@ import '../utils/constants.dart';
 
 /// Local SMS → Node forward: enable flag + allowed sender substrings.
 class LocalSmsForwardPrefs {
-  static const _enabledKey = 'local_sms_forward_enabled';
-  static const _allowedKey = 'local_sms_allowed_senders_json';
+  static const _enabledKey = 'pcu_local_sms_forward_enabled';
+  static const _allowedKey = 'pcu_local_sms_allowed_senders_json';
 
   static Future<bool> isForwardEnabled() async {
     final p = await SharedPreferences.getInstance();
@@ -28,7 +28,10 @@ class LocalSmsForwardPrefs {
     try {
       final list = jsonDecode(raw);
       if (list is List) {
-        return list.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+        return list
+            .map((e) => e.toString().trim())
+            .where((e) => e.isNotEmpty)
+            .toList();
       }
     } catch (_) {}
     return [];
@@ -36,7 +39,10 @@ class LocalSmsForwardPrefs {
 
   static Future<void> saveAllowedSenders(List<String> items) async {
     final p = await SharedPreferences.getInstance();
-    final clean = items.map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+    final clean = items
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
     await p.setString(_allowedKey, jsonEncode(clean));
   }
 }

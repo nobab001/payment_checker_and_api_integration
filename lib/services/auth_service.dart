@@ -9,10 +9,11 @@ class AuthService {
   static final AuthService instance = AuthService._();
   AuthService._();
 
-  static const _kToken = 'auth_token';
-  static const _kUserJson = 'auth_user_json';
+  static const _kToken = 'pcu_auth_token_v1';
+  static const _kUserJson = 'pcu_auth_user_v1';
+
   /// Child device: PIN verified for this user until sign-out / new OTP login.
-  static const _kDevicePinUserId = 'device_pin_verified_user_id';
+  static const _kDevicePinUserId = 'pcu_device_pin_user_v1';
 
   Future<void> persistSession(String token, UserModel user) async {
     final p = await SharedPreferences.getInstance();

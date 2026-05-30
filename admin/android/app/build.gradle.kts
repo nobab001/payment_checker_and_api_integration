@@ -21,7 +21,8 @@ android {
     }
 
     defaultConfig {
-        // Same package as root project `admin` flavor → one Admin icon whether you run from `/admin` or root + `--flavor admin`.
+        // Must stay in sync with root project `admin` flavor applicationId.
+        // Same id as User App = same Android SharedPreferences = shared login state.
         applicationId = "com.yourdomain.adminapp"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.

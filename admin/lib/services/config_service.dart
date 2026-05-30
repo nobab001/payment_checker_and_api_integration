@@ -9,12 +9,15 @@ class ConfigService {
   static final instance = ConfigService._();
 
   final _api = ApiService.instance;
-  
+
   final _globalController = StreamController<GlobalConfig>.broadcast();
   final _apiKeysController = StreamController<ApiKeys>.broadcast();
   final _socialLinksController = StreamController<SocialLinks>.broadcast();
   final _emailConfigController = StreamController<EmailConfig>.broadcast();
-  final _paymentSettingsController = StreamController<PaymentSettings>.broadcast();
+  final _emailAccountsController =
+      StreamController<List<EmailAccount>>.broadcast();
+  final _paymentSettingsController =
+      StreamController<PaymentSettings>.broadcast();
   final _usersController = StreamController<List<AppUser>>.broadcast();
   final _smsGatewaysController = StreamController<List<SmsGateway>>.broadcast();
 
@@ -38,6 +41,11 @@ class ConfigService {
   Stream<EmailConfig> emailConfigStream() {
     _startPollingIfNeeded();
     return _emailConfigController.stream;
+  }
+
+  Stream<List<EmailAccount>> emailAccountsStream() {
+    _startPollingIfNeeded();
+    return _emailAccountsController.stream;
   }
 
   Stream<PaymentSettings> paymentSettingsStream() {
@@ -84,8 +92,18 @@ class ConfigService {
         if (c['emailConfig'] != null) {
           _emailConfigController.add(EmailConfig.fromMap(c['emailConfig']));
         }
+        if (c['emailAccounts'] != null) {
+          final raw = c['emailAccounts'] as List;
+          _emailAccountsController.add(
+            raw
+                .map((x) => EmailAccount.fromMap(x as Map<String, dynamic>))
+                .toList(),
+          );
+        }
         if (c['paymentSettings'] != null) {
-          _paymentSettingsController.add(PaymentSettings.fromMap(c['paymentSettings']));
+          _paymentSettingsController.add(
+            PaymentSettings.fromMap(c['paymentSettings']),
+          );
         }
       }
     } catch (_) {}
@@ -110,26 +128,54 @@ class ConfigService {
   }
 
   // ── writes ───────────────────────────────────────────────
-  Future<void> saveGlobalConfig(GlobalConfig cfg) => _api.putJson('/api/admin/config/global', cfg.toMap());
-  Future<void> saveApiKeys(ApiKeys keys)     => _api.putJson('/api/admin/config/apiKeys', keys.toMap());
-  Future<void> saveSocialLinks(SocialLinks links) => _api.putJson('/api/admin/config/socialLinks', links.toMap());
-  Future<void> saveEmailConfig(EmailConfig cfg) => _api.putJson('/api/admin/config/emailConfig', cfg.toMap());
-  Future<void> savePaymentSettings(PaymentSettings cfg) => _api.putJson('/api/admin/config/paymentSettings', cfg.toMap());
+  Future<void> saveGlobalConfig(GlobalConfig cfg) =>
+      _api.putJson('/api/admin/config/global', cfg.toMap());
+  Future<void> saveApiKeys(ApiKeys keys) =>
+      _api.putJson('/api/admin/config/apiKeys', keys.toMap());
+  Future<void> saveSocialLinks(SocialLinks links) =>
+      _api.putJson('/api/admin/config/socialLinks', links.toMap());
+  Future<void> saveEmailConfig(EmailConfig cfg) =>
+      _api.putJson('/api/admin/config/emailConfig', cfg.toMap());
+  Future<void> savePaymentSettings(PaymentSettings cfg) =>
+      _api.putJson('/api/admin/config/paymentSettings', cfg.toMap());
 
-  Future<void> updateUser(String uid, Map<String, dynamic> data) => _api.putJson('/api/admin/users/$uid', data);
-  Future<void> blockUser(String uid, bool blocked) => updateUser(uid, {'blocked': blocked});
+  Future<void> updateUser(String uid, Map<String, dynamic> data) =>
+      _api.putJson('/api/admin/users/$uid', data);
+  Future<void> blockUser(String uid, bool blocked) =>
+      updateUser(uid, {'blocked': blocked});
 
-  Future<void> setUserPermissions(String uid, {bool? smsEnabled, bool? gmailEnabled}) {
+  Future<void> setUserPermissions(
+    String uid, {
+    bool? smsEnabled,
+    bool? gmailEnabled,
+  }) {
     return _api.putJson('/api/admin/users/$uid/permissions', {
       'smsEnabled': smsEnabled,
       'gmailEnabled': gmailEnabled,
     });
   }
 
+  // ── Email accounts ─────────────────────────────────────────
+  Future<void> addEmailAccount(EmailAccount a) =>
+      _api.postJson('/api/admin/email-accounts', a.toMap());
+  Future<void> updateEmailAccount(EmailAccount a) =>
+      _api.putJson('/api/admin/email-accounts/${a.id}', a.toMap());
+  Future<void> deleteEmailAccount(String id) =>
+      _api.deleteJson('/api/admin/email-accounts/$id');
+  Future<void> activateEmailAccount(String id) =>
+      _api.postJson('/api/admin/email-accounts/$id/activate', {});
+  Future<void> deactivateEmailAccount(String id) =>
+      _api.postJson('/api/admin/email-accounts/$id/deactivate', {});
+
   // ── SMS gateways ───────────────────────────────────────────
-  Future<void> addSmsGateway(SmsGateway gw) => _api.postJson('/api/admin/sms-settings', gw.toMap());
-  Future<void> updateSmsGateway(SmsGateway gw) => _api.putJson('/api/admin/sms-settings/${gw.id}', gw.toMap());
-  Future<void> deleteSmsGateway(String id) => _api.deleteJson('/api/admin/sms-settings/$id');
-  Future<void> activateSmsGateway(String id) => _api.postJson('/api/admin/sms-settings/$id/activate', {});
-  Future<void> deactivateSmsGateway(String id) => _api.postJson('/api/admin/sms-settings/$id/deactivate', {});
+  Future<void> addSmsGateway(SmsGateway gw) =>
+      _api.postJson('/api/admin/sms-settings', gw.toMap());
+  Future<void> updateSmsGateway(SmsGateway gw) =>
+      _api.putJson('/api/admin/sms-settings/${gw.id}', gw.toMap());
+  Future<void> deleteSmsGateway(String id) =>
+      _api.deleteJson('/api/admin/sms-settings/$id');
+  Future<void> activateSmsGateway(String id) =>
+      _api.postJson('/api/admin/sms-settings/$id/activate', {});
+  Future<void> deactivateSmsGateway(String id) =>
+      _api.postJson('/api/admin/sms-settings/$id/deactivate', {});
 }

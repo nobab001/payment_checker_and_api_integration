@@ -4,7 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class SmsAutomationPrefs {
   SmsAutomationPrefs._();
 
-  static const _configuredKey = 'sms_automation_configured_v1';
+  static const _configuredKey = 'pcu_sms_automation_configured_v1';
 
   /// Whether SIM slots + senders were saved successfully on Device Settings.
   static Future<bool> isConfigured() async {

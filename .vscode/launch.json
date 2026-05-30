@@ -52,6 +52,17 @@
       ]
     },
     {
+      "name": "Admin App — Android (pick device)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "${workspaceFolder}",
+      "program": "lib/main_admin.dart",
+      "toolArgs": [
+        "--flavor",
+        "admin"
+      ]
+    },
+    {
       "name": "User App — Chrome",
       "request": "launch",
       "type": "dart",
@@ -131,6 +142,18 @@
       "presentation": {
         "group": "payment_checker",
         "order": 3
+      }
+    },
+    {
+      "name": "একসাথে: User + Admin (pick device)",
+      "configurations": [
+        "User App — Android (pick device)",
+        "Admin App — Android (pick device)"
+      ],
+      "stopAll": true,
+      "presentation": {
+        "group": "payment_checker",
+        "order": 4
       }
     }
   ]

@@ -94,8 +94,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isPhone(String s) =>
       !CustomLoginContactField.looksLikeEmail(s) && BdPhoneUtils.isValid(s);
 
-  String get _contactForApi =>
-      CustomLoginContactField.readApiValue(_emailCtrl);
+  String get _contactForApi => CustomLoginContactField.readApiValue(_emailCtrl);
 
   String _connectivityMessage(ApiException e) {
     // Server's own message for business errors (wrong OTP, account exists, etc.).
@@ -160,11 +159,7 @@ class _LoginScreenState extends State<LoginScreen> {
     List<String> emails = const [],
   }) {
     if (!mounted) return;
-    DeviceBoundDialog.show(
-      context,
-      phones: phones,
-      emails: emails,
-    );
+    DeviceBoundDialog.show(context, phones: phones, emails: emails);
   }
 
   void _showDeviceBoundMessage(String message) {
@@ -489,14 +484,12 @@ class _LoginScreenState extends State<LoginScreen> {
         setState(() => _verifying = false);
         _showSnackbar(auth.error!, Colors.red[700]!);
       } else if (ok) {
+        if (mounted) ScaffoldMessenger.of(context).clearSnackBars();
         auth.setPendingDevicePinRequired(result.requiresSecurityPin);
         if (hwId != null && hwId.isNotEmpty && result.device != null) {
           if (!mounted) return;
           final devProv = context.read<DeviceApprovalProvider>();
-          await devProv.ingestLoginDevice(
-            hwId,
-            result.device!,
-          );
+          await devProv.ingestLoginDevice(hwId, result.device!);
         }
         if (mounted) setState(() => _verifying = false);
       }
@@ -534,15 +527,14 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _showConnectivitySnack(ApiException e) {
-    _showSnackbar(
-      _connectivityMessage(e),
-      Colors.red[700]!,
-    );
+    _showSnackbar(_connectivityMessage(e), Colors.red[700]!);
   }
 
   void _showSnackbar(String msg, Color bg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.clearSnackBars();
+    messenger.showSnackBar(
       SnackBar(
         content: Text(msg),
         backgroundColor: bg,
@@ -550,6 +542,21 @@ class _LoginScreenState extends State<LoginScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
     );
+  }
+
+  /// Ensure social URLs have a proper scheme so [launchUrl] works.
+  /// t.me/… → https://t.me/…, wa.me/… → https://wa.me/… etc.
+  static String _normalizeLaunchUrl(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return trimmed;
+    final lower = trimmed.toLowerCase();
+    if (lower.startsWith('http://') ||
+        lower.startsWith('https://') ||
+        lower.startsWith('tg://') ||
+        lower.startsWith('whatsapp://')) {
+      return trimmed;
+    }
+    return 'https://$trimmed';
   }
 
   Future<void> _launch(String url) async {
@@ -570,7 +577,11 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
     try {
-      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      final normalized = _normalizeLaunchUrl(url);
+      await launchUrl(
+        Uri.parse(normalized),
+        mode: LaunchMode.externalApplication,
+      );
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -589,28 +600,29 @@ class _LoginScreenState extends State<LoginScreen> {
 
   static const _hPad = 24.0;
   static const _alertToOtpGap = 18.0;
+
   /// OTP বক্স–লগইন বাটনের মাঝের ফাঁক; টাইমার মাঝখানে (আগের ফাঁক − ৭dp)।
   static const _otpToLoginBridgeHeight = 40.0;
   static const _loginToSocialGap = 20.0;
 
   InputDecoration get _contactDecoration => InputDecoration(
-        labelText: 'মোবাইল নম্বর অথবা Gmail এড্রেস',
-        labelStyle: const TextStyle(fontSize: 13),
-        prefixIcon: const Icon(Icons.person_outline),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: Colors.grey.shade300),
-        ),
-        disabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: Colors.grey.shade200),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: AppColors.primary, width: 2),
-        ),
-      );
+    labelText: 'মোবাইল নম্বর অথবা Gmail এড্রেস',
+    labelStyle: const TextStyle(fontSize: 13),
+    prefixIcon: const Icon(Icons.person_outline),
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: BorderSide(color: Colors.grey.shade300),
+    ),
+    disabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: BorderSide(color: Colors.grey.shade200),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: const BorderSide(color: AppColors.primary, width: 2),
+    ),
+  );
 
   Widget _buildMaintenanceBanner() {
     return Container(
@@ -684,7 +696,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   ? '${_emailCtrl.text.trim()}-এ নিশ্চিতকরণ কোড পাঠানো হয়েছে'
                   : '${_emailCtrl.text.trim()}-এ ৬ সংখ্যার কোড পাঠানো হয়েছে',
               style: TextStyle(
-                color: _isNewUser ? Colors.green.shade800 : Colors.blue.shade800,
+                color: _isNewUser
+                    ? Colors.green.shade800
+                    : Colors.blue.shade800,
                 fontSize: 13,
                 height: 1.35,
               ),
@@ -745,7 +759,11 @@ class _LoginScreenState extends State<LoginScreen> {
       ),
       child: Row(
         children: [
-          Icon(Icons.hourglass_top_rounded, color: Colors.amber.shade800, size: 22),
+          Icon(
+            Icons.hourglass_top_rounded,
+            color: Colors.amber.shade800,
+            size: 22,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
