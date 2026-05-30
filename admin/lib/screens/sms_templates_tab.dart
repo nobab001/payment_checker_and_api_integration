@@ -180,11 +180,12 @@ class _SmsTemplatesTabState extends State<SmsTemplatesTab> {
                       const SizedBox(height: 16),
                       Row(
                         children: [
-                          const Text(
-                            'কন্ডিশন / ফরম্যাটসমূহ (Conditions)',
-                            style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold),
+                          const Expanded(
+                            child: Text(
+                              'কন্ডিশন / ফরম্যাটসমূহ (Conditions)',
+                              style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold),
+                            ),
                           ),
-                          const Spacer(),
                           IconButton(
                             icon: const Icon(Icons.add_circle, color: Color(0xFF4FC3F7)),
                             onPressed: () {
