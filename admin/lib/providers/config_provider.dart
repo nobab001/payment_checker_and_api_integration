@@ -145,6 +145,17 @@ class ConfigProvider extends ChangeNotifier {
   Future<bool> deactivateSmsGateway(String id) =>
       _save(() => _svc.deactivateSmsGateway(id));
 
+  Future<String> loadSmsOtpTemplate() async {
+    try {
+      return await _svc.getSmsOtpTemplate();
+    } catch (e) {
+      return '';
+    }
+  }
+
+  Future<bool> saveSmsOtpTemplate(String template) =>
+      _save(() => _svc.setSmsOtpTemplate(template));
+
   Future<void> blockUser(String uid, bool blocked) =>
       _svc.blockUser(uid, blocked);
 

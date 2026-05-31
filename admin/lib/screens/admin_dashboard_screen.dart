@@ -222,6 +222,10 @@ class _ApiKeysTab extends StatelessWidget {
         Divider(color: Colors.white12),
         const SizedBox(height: 24),
         _EmailAccountsSection(cfg: cfg),
+        const SizedBox(height: 32),
+        Divider(color: Colors.white12),
+        const SizedBox(height: 24),
+        _SmsOtpTemplateSection(cfg: cfg),
       ],
     );
   }
@@ -310,6 +314,160 @@ class _EmailAccountsSection extends StatelessWidget {
   }
 }
 
+// ── SMS OTP Template section ──────────────────────────────────────────────────
+
+class _SmsOtpTemplateSection extends StatefulWidget {
+  final ConfigProvider cfg;
+  const _SmsOtpTemplateSection({required this.cfg});
+
+  @override
+  State<_SmsOtpTemplateSection> createState() => _SmsOtpTemplateSectionState();
+}
+
+class _SmsOtpTemplateSectionState extends State<_SmsOtpTemplateSection> {
+  final _ctrl = TextEditingController();
+  bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTemplate();
+  }
+
+  Future<void> _loadTemplate() async {
+    setState(() => _loading = true);
+    final t = await widget.cfg.loadSmsOtpTemplate();
+    if (mounted) {
+      _ctrl.text = t;
+      setState(() => _loading = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            const _SectionHeader(
+              title: 'SMS OTP Format',
+              icon: Icons.message_outlined,
+            ),
+            const Spacer(),
+            if (_loading)
+              const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Color(0xFF4FC3F7),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFB74D).withAlpha(15),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFFFFB74D).withAlpha(60)),
+          ),
+          child: const Text(
+            'Use {code} where the 6-digit OTP should appear.\n'
+            'Example: Your OTP is {code}. Do not share it with anyone.',
+            style: TextStyle(color: Color(0xFFFFB74D), fontSize: 11),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _ctrl,
+          maxLines: 3,
+          style: const TextStyle(color: Colors.white, fontSize: 13),
+          decoration: InputDecoration(
+            hintText: 'Enter SMS format...',
+            hintStyle: const TextStyle(color: Colors.white24),
+            filled: true,
+            fillColor: const Color(0xFF0D1B2A),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide.none,
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: const BorderSide(color: Color(0xFF4FC3F7), width: 2),
+            ),
+            contentPadding: const EdgeInsets.all(12),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF4FC3F7),
+                foregroundColor: const Color(0xFF0D1B2A),
+              ),
+              icon: const Icon(Icons.save, size: 18),
+              label: const Text('Save Format'),
+              onPressed: () async {
+                final text = _ctrl.text.trim();
+                if (!text.contains('{code}')) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Template must contain {code} placeholder'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                  return;
+                }
+                final messenger = ScaffoldMessenger.of(context);
+                final ok = await widget.cfg.saveSmsOtpTemplate(text);
+                if (mounted) {
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        ok
+                            ? 'SMS format saved'
+                            : 'Save failed: ${widget.cfg.saveError}',
+                      ),
+                      backgroundColor: ok
+                          ? const Color(0xFF81C784)
+                          : Colors.red[700],
+                    ),
+                  );
+                }
+              },
+            ),
+            const SizedBox(width: 12),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white70,
+                side: const BorderSide(color: Colors.white24),
+              ),
+              icon: const Icon(Icons.restore, size: 18),
+              label: const Text('Reset Default'),
+              onPressed: () {
+                setState(() {
+                  _ctrl.text =
+                      'আপনার Payment Checker OTP: {code}। কাউকে বলবেন না।';
+                });
+              },
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
 class _EmailAccountCard extends StatelessWidget {
   final EmailAccount account;
   final ConfigProvider cfg;
@@ -335,13 +493,27 @@ class _EmailAccountCard extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: Text(
-                  account.email,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (account.name.isNotEmpty)
+                      Text(
+                        account.name,
+                        style: const TextStyle(
+                          color: Color(0xFF4FC3F7),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                    Text(
+                      account.email,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w500,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
                 ),
               ),
               if (account.isActive)
@@ -456,6 +628,7 @@ void _showEmailAccountDialog(
   EmailAccount? existing,
 ) {
   final isEdit = existing != null;
+  final nameCtrl = TextEditingController(text: existing?.name ?? '');
   final emailCtrl = TextEditingController(text: existing?.email ?? '');
   final passCtrl = TextEditingController(text: existing?.appPassword ?? '');
   final limitCtrl = TextEditingController(
@@ -476,6 +649,12 @@ void _showEmailAccountDialog(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              _DialogField(
+                controller: nameCtrl,
+                label: 'Account Name (optional)',
+                hint: 'e.g. Primary Gmail',
+              ),
+              const SizedBox(height: 12),
               _DialogField(
                 controller: emailCtrl,
                 label: 'Gmail Address',
@@ -562,6 +741,7 @@ void _showEmailAccountDialog(
               }
               final a = EmailAccount(
                 id: existing?.id ?? '',
+                name: nameCtrl.text.trim(),
                 email: email,
                 appPassword: pass,
                 dailyLimit: limit,

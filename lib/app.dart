@@ -37,56 +37,62 @@ import 'widgets/sms_permission_gate.dart';
 
 /// Sync engine, session restore, and User App widget tree.
 Future<void> bootUserApp() async {
-  await runZonedGuarded(() async {
-    WidgetsFlutterBinding.ensureInitialized();
-    await SimFilterLocalRepository.instance.ensureDefaults();
-    await AppCrashLogger.install();
-    FlutterForegroundTask.initCommunicationPort();
+  await runZonedGuarded(
+    () async {
+      WidgetsFlutterBinding.ensureInitialized();
+      await SimFilterLocalRepository.instance.ensureDefaults();
+      await AppCrashLogger.install();
+      if (!kIsWeb) {
+        FlutterForegroundTask.initCommunicationPort();
+      }
 
-  final auth = AuthProvider();
-  await auth.restoreSession();
-  await ApiService.instance.syncBaseUrlFromPrefs();
+      final auth = AuthProvider();
+      await auth.restoreSession();
+      await ApiService.instance.syncBaseUrlFromPrefs();
 
-  final deviceApproval = DeviceApprovalProvider();
-  DeviceApprovalProvider.wireSignOutBridge(deviceApproval);
-  DeviceApprovalBridge.onRejectedMustSignOut = () => auth.signOut();
+      final deviceApproval = DeviceApprovalProvider();
+      DeviceApprovalProvider.wireSignOutBridge(deviceApproval);
+      DeviceApprovalBridge.onRejectedMustSignOut = () => auth.signOut();
 
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-    await SmsSyncForegroundService.configurePlugin();
-    DeviceSessionBridge.registerOnSignOut(() {
-      unawaited(SmsSyncForegroundService.stop());
-      unawaited(SmsServiceStatePrefs.deactivateService());
-    });
-  }
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        await SmsSyncForegroundService.configurePlugin();
+        DeviceSessionBridge.registerOnSignOut(() {
+          unawaited(SmsSyncForegroundService.stop());
+          unawaited(SmsServiceStatePrefs.deactivateService());
+        });
+      }
 
-  // Sync engine is Android-only (sqflite + workmanager have no web support).
-  final syncProvider = SyncProvider();
-  if (!kIsWeb) {
-    await Workmanager().initialize(
-      workManagerCallbackDispatcher,
-    );
-    await syncProvider.init();
-  }
+      // Sync engine is Android-only (sqflite + workmanager have no web support).
+      final syncProvider = SyncProvider();
+      if (!kIsWeb) {
+        await Workmanager().initialize(workManagerCallbackDispatcher);
+        await syncProvider.init();
+      }
 
-    runApp(
-      MultiProvider(
-        providers: [
-          /// Required for [DeviceManagerPage], [DeviceSettingsPage], etc. (`context.read<ApiService>()`).
-          /// [DeviceManagerPage] also uses [ApiService.instance] so the screen works even if this is omitted.
-          Provider<ApiService>.value(value: ApiService.instance),
-          ChangeNotifierProvider<AuthProvider>.value(value: auth),
-          ChangeNotifierProvider<DeviceApprovalProvider>.value(value: deviceApproval),
-          ChangeNotifierProvider(create: (_) => SmsProvider()),
-          ChangeNotifierProvider(
-              create: (_) => RemoteConfigProvider()..startListening()),
-          ChangeNotifierProvider(create: (_) => syncProvider),
-        ],
-        child: const UserApp(),
-      ),
-    );
-  }, (error, stack) {
-    AppCrashLogger.log('zone', error, stack);
-  });
+      runApp(
+        MultiProvider(
+          providers: [
+            /// Required for [DeviceManagerPage], [DeviceSettingsPage], etc. (`context.read<ApiService>()`).
+            /// [DeviceManagerPage] also uses [ApiService.instance] so the screen works even if this is omitted.
+            Provider<ApiService>.value(value: ApiService.instance),
+            ChangeNotifierProvider<AuthProvider>.value(value: auth),
+            ChangeNotifierProvider<DeviceApprovalProvider>.value(
+              value: deviceApproval,
+            ),
+            ChangeNotifierProvider(create: (_) => SmsProvider()),
+            ChangeNotifierProvider(
+              create: (_) => RemoteConfigProvider()..startListening(),
+            ),
+            ChangeNotifierProvider(create: (_) => syncProvider),
+          ],
+          child: const UserApp(),
+        ),
+      );
+    },
+    (error, stack) {
+      AppCrashLogger.log('zone', error, stack);
+    },
+  );
 }
 
 // ── Root widget ───────────────────────────────────────────────────────────────
@@ -106,8 +112,10 @@ class UserApp extends StatelessWidget {
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
           fillColor: Colors.grey.shade50,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 14,
+          ),
         ),
       ),
       home: const AppErrorBoundary(child: _AuthGate()),
@@ -189,9 +197,9 @@ class _HomeLoaderState extends State<_HomeLoader> {
     try {
       if (!kIsWeb) {
         try {
-          final hw = await const AndroidId()
-              .getId()
-              .timeout(const Duration(seconds: 8));
+          final hw = await const AndroidId().getId().timeout(
+            const Duration(seconds: 8),
+          );
           if (hw != null && hw.isNotEmpty) {
             ApiService.instance.setHardwareDeviceId(hw);
           }
@@ -217,13 +225,15 @@ class _HomeLoaderState extends State<_HomeLoader> {
   Widget build(BuildContext context) {
     if (!_ready) return const SplashScreen();
     if (_needsSetup) {
-      return SignupScreen(onComplete: () {
-        setState(() {
-          _needsSetup = false;
-          _ready = false;
-        });
-        _init();
-      });
+      return SignupScreen(
+        onComplete: () {
+          setState(() {
+            _needsSetup = false;
+            _ready = false;
+          });
+          _init();
+        },
+      );
     }
     return const DeviceSecurityPinGate(
       child: SmsPermissionGate(child: HomeScreen()),

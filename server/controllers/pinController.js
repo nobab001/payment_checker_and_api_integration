@@ -18,6 +18,7 @@ function registerPinRoutes(app, pool, deps) {
     generateOtp,
     dispatchSmsFromSettings,
     sendOtpToGmail,
+    getSmsOtpTemplate,
     OTP_EXPIRY_MIN,
     RESEND_COOLDOWN_SEC,
     hashPin,
@@ -129,11 +130,12 @@ function registerPinRoutes(app, pool, deps) {
     );
 
     try {
+      const tmpl = await getSmsOtpTemplate(pool);
+      const text = tmpl ? tmpl.replace(/\{code\}/g, code) : `আপনার Payment Checker PIN রিসেট OTP: ${code}। কাউকে বলবেন না।`;
       if (isBdPhone(phone)) {
-        const text = `আপনার Payment Checker PIN রিসেট OTP: ${code}। কাউকে বলবেন না।`;
         await dispatchSmsFromSettings(phone, text);
       } else {
-        await sendOtpToGmail(phone, code);
+        await sendOtpToGmail(phone, code, text);
       }
     } catch (sendErr) {
       const allowConsole = String(process.env.ALLOW_OTP_WITHOUT_SMS || "").trim() === "1";

@@ -178,4 +178,13 @@ class ConfigService {
       _api.postJson('/api/admin/sms-settings/$id/activate', {});
   Future<void> deactivateSmsGateway(String id) =>
       _api.postJson('/api/admin/sms-settings/$id/deactivate', {});
+
+  // ── SMS OTP Template ───────────────────────────────────────
+  Future<String> getSmsOtpTemplate() async {
+    final data = await _api.getJson('/api/admin/sms-otp-template');
+    return data['template'] as String? ?? '';
+  }
+
+  Future<void> setSmsOtpTemplate(String template) =>
+      _api.putJson('/api/admin/sms-otp-template', {'template': template});
 }

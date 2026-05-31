@@ -129,8 +129,12 @@ ALTER TABLE sms_records ADD COLUMN IF NOT EXISTS trx_id VARCHAR(64) DEFAULT NULL
 ALTER TABLE sms_records ADD COLUMN IF NOT EXISTS sender_number VARCHAR(32) DEFAULT NULL;
 
 -- 8. email_accounts — multiple Gmail SMTP accounts for OTP with round-robin
+ALTER TABLE email_accounts
+  ADD COLUMN IF NOT EXISTS name VARCHAR(100) DEFAULT NULL COMMENT 'Friendly display name (optional)';
+
 CREATE TABLE IF NOT EXISTS email_accounts (
   id            INT AUTO_INCREMENT PRIMARY KEY,
+  name          VARCHAR(100)  DEFAULT NULL COMMENT 'Friendly display name (optional)',
   email         VARCHAR(255)  NOT NULL,
   app_password  VARCHAR(255)  NOT NULL,
   daily_limit   INT           NOT NULL DEFAULT 500 COMMENT 'Max OTP emails per day for this account',

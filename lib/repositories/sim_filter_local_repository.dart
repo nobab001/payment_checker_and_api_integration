@@ -223,8 +223,9 @@ class SimFilterLocalRepository {
     List<String> pick(List<String> server, List<String> localList) {
       if (server.isNotEmpty) return List<String>.from(server);
       if (localList.isNotEmpty) return localList;
-      if (!seeded)
+      if (!seeded) {
         return List<String>.from(SimFilterPreferences.defaultSenders);
+      }
       return localList;
     }
 

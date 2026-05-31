@@ -34,6 +34,13 @@ const GMAIL_APP_PASSWORD = String(
   process.env.GMAIL_APP_PASSWORD || process.env.GMAIL_PASS || ""
 ).replace(/\s+/g, "");
 
+/** SMS Gateway fallback from .env (used when DB has no active row). */
+const SMS_API_URL = String(process.env.SMS_API_URL || "").trim();
+const SMS_API_KEY = String(process.env.SMS_API_KEY || "").trim();
+const SMS_API_SECRET = String(process.env.SMS_API_SECRET || "").trim();
+const SMS_SENDER_ID = String(process.env.SMS_SENDER_ID || "").trim();
+const SMS_HTTP_METHOD = String(process.env.SMS_HTTP_METHOD || "GET").trim().toUpperCase();
+
 let _gmailTransport = null;
 function getGmailTransport() {
   if (!GMAIL_USER || !GMAIL_APP_PASSWORD) return null;
@@ -46,29 +53,52 @@ function getGmailTransport() {
   return _gmailTransport;
 }
 
-async function sendViaTransport(transport, toAddress, code, fromEmail) {
+async function sendViaTransport(transport, toAddress, code, fromEmail, messageText) {
   const from = process.env.GMAIL_FROM || fromEmail;
   const subject = process.env.GMAIL_OTP_SUBJECT || "আপনার OTP কোড - Payment Checker";
-  await transport.sendMail({
-    from: `"Payment Checker" <${from}>`,
-    to: toAddress,
-    subject,
-    text: `আপনার Payment Checker OTP: ${code}। কাউকে বলবেন না।`,
-    html: `
+  const plainText = messageText ? messageText.replace(/<[^>]+>/g, "") : `আপনার Payment Checker OTP: ${code}। কাউকে বলবেন না।`;
+  const htmlBody = messageText
+    ? `<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px;border:1px solid #e0e0e0;border-radius:12px">
+        <h2 style="color:#1A237E;margin:0 0 12px">Payment Checker</h2>
+        <p style="font-size:16px;white-space:pre-wrap">${messageText.replace(/\n/g, "<br>")}</p>
+       </div>`
+    : `
       <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px;border:1px solid #e0e0e0;border-radius:12px">
         <h2 style="color:#1A237E;margin:0 0 12px">Payment Checker</h2>
         <p style="font-size:16px">আপনার OTP কোড:</p>
         <p style="font-size:28px;font-weight:bold;letter-spacing:4px;color:#1A237E">${code}</p>
         <p style="color:#666;font-size:14px">এই কোড কাউকে দেবেন না।</p>
-      </div>`,
+      </div>`;
+  await transport.sendMail({
+    from: `"Payment Checker" <${from}>`,
+    to: toAddress,
+    subject,
+    text: plainText,
+    html: htmlBody,
   });
+}
+
+/** Load custom SMS OTP template from settings (key = sms_otp_template). */
+async function getSmsOtpTemplate(pool) {
+  try {
+    const [rows] = await pool.query(
+      "SELECT setting_value FROM settings WHERE setting_key = ? LIMIT 1",
+      ["sms_otp_template"]
+    );
+    const val = rows[0]?.setting_value;
+    if (val && String(val).includes("{code}")) return String(val);
+  } catch (e) {
+    console.error("[getSmsOtpTemplate] DB error:", e.message);
+  }
+  return null;
 }
 
 /**
  * Send 6-digit OTP to the user's Gmail using round-robin from email_accounts.
  * Falls back to env-based single account if no DB accounts configured.
+ * Accepts optional messageText to use the same SMS OTP template in email body.
  */
-async function sendOtpToGmail(toAddress, code) {
+async function sendOtpToGmail(toAddress, code, messageText) {
   // 1. Try database email_accounts first (round-robin)
   try {
     const [accounts] = await pool.query(
@@ -90,7 +120,7 @@ async function sendOtpToGmail(toAddress, code) {
         auth: { user: account.email, pass: account.app_password },
       });
 
-      await sendViaTransport(transport, toAddress, code, account.email);
+      await sendViaTransport(transport, toAddress, code, account.email, messageText);
 
       // Increment counter for this account
       await pool.query(
@@ -112,7 +142,7 @@ async function sendOtpToGmail(toAddress, code) {
     err.statusCode = 503;
     throw err;
   }
-  await sendViaTransport(transport, toAddress, code, GMAIL_USER);
+  await sendViaTransport(transport, toAddress, code, GMAIL_USER, messageText);
 }
 
 const pool = mysql.createPool({
@@ -438,32 +468,49 @@ function applyTemplateRaw(tpl, { apiKey, phone, message, senderId, username }) {
 }
 
 /**
- * Load active SMS settings and call gateway (GET or POST). Provider-agnostic via DB templates.
+ * Build a fallback gateway object from .env variables.
+ * If SMS_API_URL already contains template placeholders, use it as-is.
+ * Otherwise append standard BulkSMSBD-style query params.
  */
-async function dispatchSmsFromSettings(phone, messageText) {
-  const [rows] = await pool.query(
-    `SELECT gateway_url, http_method, post_body_template, api_key, username, sender_id
-     FROM sms_settings
-     WHERE is_active = 1
-     ORDER BY id ASC
-     LIMIT 1`
-  );
-  if (!rows.length) {
-    const err = new Error("SMS gateway not configured (sms_settings empty or inactive)");
-    err.statusCode = 503;
-    throw err;
+function buildEnvSmsGateway() {
+  if (!SMS_API_URL || !SMS_API_KEY) return null;
+  let url = SMS_API_URL;
+  if (!url.includes("{apiKey}")) {
+    const sep = url.includes("?") ? "&" : "?";
+    url += `${sep}api_key={apiKey}&type=text&number={phone}&senderid={senderId}&message={message}`;
   }
+  return {
+    gateway_url: url,
+    http_method: SMS_HTTP_METHOD,
+    post_body_template: null,
+    api_key: SMS_API_KEY,
+    username: SMS_API_SECRET || null,
+    sender_id: SMS_SENDER_ID || null,
+  };
+}
 
-  const s = rows[0];
+/**
+ * Internal: send SMS via a given gateway object.
+ */
+async function _sendViaGateway(s, source, phone, messageText) {
   const apiKey = s.api_key;
   const username = s.username;
   const senderId = s.sender_id;
   const method = String(s.http_method || "GET").toUpperCase();
   const gatewayPhone = isBdPhone(phone) ? normalizeBdPhoneForGateway(phone) : phone;
+
+  // Normalize URL: if placeholders missing, auto-append query params using stored credentials
+  let gatewayUrl = s.gateway_url || "";
+  const needsPlaceholders = !gatewayUrl.includes("{apiKey}") && !gatewayUrl.includes("{phone}") && !gatewayUrl.includes("{message}");
+  if (needsPlaceholders && apiKey) {
+    const sep = gatewayUrl.includes("?") ? "&" : "?";
+    gatewayUrl += `${sep}api_key={apiKey}&type=text&number={phone}&senderid={senderId}&message={message}`;
+  }
+
   const subs = { apiKey, phone: gatewayPhone, message: messageText, senderId, username };
 
   if (method === "POST") {
-    const url = applyTemplateEncoded(s.gateway_url, subs);
+    const url = applyTemplateEncoded(gatewayUrl, subs);
     let bodyObj;
     const rawBody = s.post_body_template;
     if (rawBody && String(rawBody).trim()) {
@@ -497,8 +544,12 @@ async function dispatchSmsFromSettings(phone, messageText) {
     return;
   }
 
-  const url = applyTemplateEncoded(s.gateway_url, subs);
-  console.log(`[SMS] GET → ${url}`);
+  const url = applyTemplateEncoded(gatewayUrl, subs);
+  if (source === "db") {
+    console.log(`[SMS] GET → ${url}`);
+  } else {
+    console.log(`[SMS] GET (env fallback) → ${url}`);
+  }
   const res = await fetch(url, { method: "GET", signal: AbortSignal.timeout(15_000) });
   if (!res.ok) {
     console.error(`[SMS] GET failed HTTP ${res.status} → ${url}`);
@@ -512,6 +563,44 @@ async function dispatchSmsFromSettings(phone, messageText) {
       console.log(`[SMS] GET gateway ok → ${gatewayPhone} response: ${body}`);
     }
   } catch (_) {}
+}
+
+/**
+ * Load active SMS settings and call gateway (GET or POST). Provider-agnostic via DB templates.
+ * Falls back to .env on DB miss OR on DB HTTP failure.
+ */
+async function dispatchSmsFromSettings(phone, messageText) {
+  // 1. Try database first
+  const [rows] = await pool.query(
+    `SELECT gateway_url, http_method, post_body_template, api_key, username, sender_id
+     FROM sms_settings
+     WHERE is_active = 1
+     ORDER BY id ASC
+     LIMIT 1`
+  );
+
+  if (rows.length) {
+    try {
+      await _sendViaGateway(rows[0], "db", phone, messageText);
+      return;
+    } catch (dbErr) {
+      console.error(`[SMS] DB gateway failed: ${dbErr.message}. Trying .env fallback...`);
+      // fall through to .env fallback
+    }
+  }
+
+  // 2. Fallback to .env SMS gateway (on DB miss OR DB failure)
+  const envGw = buildEnvSmsGateway();
+  if (envGw) {
+    await _sendViaGateway(envGw, "env", phone, messageText);
+    return;
+  }
+
+  const err = new Error(
+    "SMS gateway not configured (sms_settings empty/inactive and SMS_API_URL missing in .env)"
+  );
+  err.statusCode = 503;
+  throw err;
 }
 
 function authMiddleware(req, res, next) {
@@ -683,11 +772,12 @@ async function handleSendOtp(req, res) {
       const otpRowId = ins.insertId;
 
       try {
+        const tmpl = await getSmsOtpTemplate(pool);
+        const text = tmpl ? tmpl.replace(/\{code\}/g, code) : `আপনার Payment Checker OTP: ${code}। কাউকে বলবেন না।`;
         if (isBdPhone(phone)) {
-          const text = `আপনার Payment Checker OTP: ${code}। কাউকে বলবেন না।`;
           await dispatchSmsFromSettings(phone, text);
         } else {
-          await sendOtpToGmail(phone, code);
+          await sendOtpToGmail(phone, code, text);
         }
       } catch (sendErr) {
         // Optional: skip real SMS and print OTP (local only). Set ALLOW_OTP_WITHOUT_SMS=1 in .env
@@ -1212,6 +1302,7 @@ app.get("/api/admin/email-accounts", adminKeyMiddleware, async (req, res) => {
     const [rows] = await pool.query("SELECT * FROM email_accounts ORDER BY id ASC");
     const accounts = rows.map((r) => ({
       id: String(r.id),
+      name: r.name || "",
       email: r.email || "",
       appPassword: r.app_password || "",
       dailyLimit: Number(r.daily_limit) || 500,
@@ -1226,6 +1317,7 @@ app.get("/api/admin/email-accounts", adminKeyMiddleware, async (req, res) => {
 });
 
 app.post("/api/admin/email-accounts", adminKeyMiddleware, async (req, res) => {
+  const name = String(req.body?.name || "").trim();
   const email = String(req.body?.email || "").trim();
   const appPassword = String(req.body?.appPassword || "").trim();
   const dailyLimit = Number(req.body?.dailyLimit) || 500;
@@ -1237,9 +1329,9 @@ app.post("/api/admin/email-accounts", adminKeyMiddleware, async (req, res) => {
 
   try {
     const [result] = await pool.query(
-      `INSERT INTO email_accounts (email, app_password, daily_limit, sent_count, is_active)
-       VALUES (?, ?, ?, 0, ?)`,
-      [email, appPassword, dailyLimit, isActive]
+      `INSERT INTO email_accounts (name, email, app_password, daily_limit, sent_count, is_active)
+       VALUES (?, ?, ?, ?, 0, ?)`,
+      [name || null, email, appPassword, dailyLimit, isActive]
     );
     return res.json({ success: true, id: String(result.insertId) });
   } catch (e) {
@@ -1250,6 +1342,7 @@ app.post("/api/admin/email-accounts", adminKeyMiddleware, async (req, res) => {
 
 app.put("/api/admin/email-accounts/:id", adminKeyMiddleware, async (req, res) => {
   const id = req.params.id;
+  const name = String(req.body?.name || "").trim();
   const email = String(req.body?.email || "").trim();
   const appPassword = String(req.body?.appPassword || "").trim();
   const dailyLimit = Number(req.body?.dailyLimit) || 500;
@@ -1261,8 +1354,8 @@ app.put("/api/admin/email-accounts/:id", adminKeyMiddleware, async (req, res) =>
 
   try {
     await pool.query(
-      `UPDATE email_accounts SET email = ?, app_password = ?, daily_limit = ?, is_active = ? WHERE id = ?`,
-      [email, appPassword, dailyLimit, isActive, id]
+      `UPDATE email_accounts SET name = ?, email = ?, app_password = ?, daily_limit = ?, is_active = ? WHERE id = ?`,
+      [name || null, email, appPassword, dailyLimit, isActive, id]
     );
     return res.json({ success: true });
   } catch (e) {
@@ -1307,6 +1400,38 @@ app.post("/api/admin/email-accounts/:id/deactivate", adminKeyMiddleware, async (
     return res.json({ success: true });
   } catch (e) {
     console.error("[admin/email-accounts] deactivate:", e);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// ── Admin SMS OTP Template (requires x-admin-key) ──────────────────────────────
+
+app.get("/api/admin/sms-otp-template", adminKeyMiddleware, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      "SELECT setting_value FROM settings WHERE setting_key = ? LIMIT 1",
+      ["sms_otp_template"]
+    );
+    return res.json({ success: true, template: rows[0]?.setting_value || "" });
+  } catch (e) {
+    console.error("[admin/sms-otp-template] get:", e);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+app.put("/api/admin/sms-otp-template", adminKeyMiddleware, async (req, res) => {
+  const template = String(req.body?.template || "").trim();
+  if (!template.includes("{code}")) {
+    return res.status(400).json({ success: false, message: "Template must contain {code} placeholder" });
+  }
+  try {
+    await pool.query(
+      "INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = ?",
+      ["sms_otp_template", template, template]
+    );
+    return res.json({ success: true });
+  } catch (e) {
+    console.error("[admin/sms-otp-template] put:", e);
     return res.status(500).json({ success: false, message: "Server error" });
   }
 });
@@ -1964,6 +2089,7 @@ async function startServer() {
     generateOtp,
     dispatchSmsFromSettings,
     sendOtpToGmail,
+    getSmsOtpTemplate,
     OTP_EXPIRY_MIN,
     RESEND_COOLDOWN_SEC,
     hashPin,
@@ -1977,6 +2103,7 @@ async function startServer() {
     generateOtp,
     dispatchSmsFromSettings,
     sendOtpToGmail,
+    getSmsOtpTemplate,
     OTP_EXPIRY_MIN,
     RESEND_COOLDOWN_SEC,
     userRowToJson,

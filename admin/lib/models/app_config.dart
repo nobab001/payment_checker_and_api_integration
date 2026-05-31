@@ -128,6 +128,7 @@ class EmailConfig {
 /// One Gmail SMTP account for OTP round-robin.
 class EmailAccount {
   final String id;
+  final String name;
   final String email;
   final String appPassword;
   final int dailyLimit;
@@ -136,6 +137,7 @@ class EmailAccount {
 
   const EmailAccount({
     this.id = '',
+    this.name = '',
     this.email = '',
     this.appPassword = '',
     this.dailyLimit = 500,
@@ -145,6 +147,7 @@ class EmailAccount {
 
   factory EmailAccount.fromMap(Map<String, dynamic> m) => EmailAccount(
     id: m['id'] as String? ?? '',
+    name: m['name'] as String? ?? '',
     email: m['email'] as String? ?? '',
     appPassword:
         m['appPassword'] as String? ?? m['app_password'] as String? ?? '',
@@ -160,6 +163,7 @@ class EmailAccount {
   );
 
   Map<String, dynamic> toMap() => {
+    'name': name,
     'email': email,
     'appPassword': appPassword,
     'dailyLimit': dailyLimit,
@@ -168,6 +172,7 @@ class EmailAccount {
 
   EmailAccount copyWith({
     String? id,
+    String? name,
     String? email,
     String? appPassword,
     int? dailyLimit,
@@ -175,6 +180,7 @@ class EmailAccount {
     bool? isActive,
   }) => EmailAccount(
     id: id ?? this.id,
+    name: name ?? this.name,
     email: email ?? this.email,
     appPassword: appPassword ?? this.appPassword,
     dailyLimit: dailyLimit ?? this.dailyLimit,

@@ -22,6 +22,7 @@ function registerCredentialRoutes(app, pool, deps) {
     generateOtp,
     dispatchSmsFromSettings,
     sendOtpToGmail,
+    getSmsOtpTemplate,
     OTP_EXPIRY_MIN,
     RESEND_COOLDOWN_SEC,
     userRowToJson,
@@ -109,11 +110,12 @@ function registerCredentialRoutes(app, pool, deps) {
     );
 
     try {
+      const tmpl = await getSmsOtpTemplate(pool);
+      const text = tmpl ? tmpl.replace(/\{code\}/g, code) : `আপনার Payment Checker যোগাযোগ যাচাই OTP: ${code}। কাউকে বলবেন না।`;
       if (isBdPhone(value)) {
-        const text = `আপনার Payment Checker যোগাযোগ যাচাই OTP: ${code}। কাউকে বলবেন না।`;
         await dispatchSmsFromSettings(value, text);
       } else {
-        await sendOtpToGmail(value, code);
+        await sendOtpToGmail(value, code, text);
       }
     } catch (sendErr) {
       const allowConsole = String(process.env.ALLOW_OTP_WITHOUT_SMS || "").trim() === "1";
